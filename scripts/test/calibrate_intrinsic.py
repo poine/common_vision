@@ -35,6 +35,7 @@ Run opencv camera intrinsic calibration
 '''
 def calibrate_camera(img_points, object_points, img_shape, rational_model=False):
     flags = cv2.CALIB_RATIONAL_MODEL if rational_model else 0
+    flags |= cv2.CALIB_FIX_K3
     rep_err, cmtx, distk, rvecs, tvecs = cv2.calibrateCamera(object_points, img_points, img_shape, None, None, flags=flags)
     LOG.info(" cv calibration:")
     LOG.info("   Reprojection error: {:.3f} pixels".format(rep_err))
@@ -49,7 +50,7 @@ def calibrate_camera(img_points, object_points, img_shape, rational_model=False)
 '''
 def report_calibration(imgs_path, rep_errs):
     for _p, _re in zip(imgs_path, rep_errs):
-        LOG.info("{} {}".format(_p, _re))
+        LOG.info("img: {} re(mean/min/max): {:4.2f} {:4.2f} {:4.2f} pixels".format(_p, np.mean(_re), np.min(_re), np.max(_re)))
     
 
 '''
@@ -62,12 +63,14 @@ if __name__ == '__main__':
     LOG.info(" using opencv version: {}".format(cv2.__version__))
 
     #_dir, _img_prefix = '/mnt/mint17/home/poine/work/teaching_material/automatique/trunk/vision/simulations/camera_calibration/poine_pixel/', 'IMG_'
-    _dir, _img_prefix = '/tmp/foo', 'left-'
-    #imgs, imgs_path = cvu.load_images_in_dir(_dir, _img_prefix)
+    _dir, _img_prefix = '/mnt/mint17/home/poine/work/teaching_material/automatique/trunk/vision/simulations/camera_calibration/ueye_poine_front/2016_03_27', 'left'
+    #_dir, _img_prefix = '/tmp/cam_road_christine', 'left-'
+    imgs, imgs_path = cvu.load_images_in_dir(_dir, _img_prefix)
 
-    imgs, imgs_path = cvu.load_images_in_tarfile('/tmp/foo.tgz', _img_prefix)
-    
-    img_points, object_points, img_shape, rets = detect_chessboards(imgs, imgs_path, cb_size=0.025, refine_corners=True)
+    #imgs, imgs_path = cvu.load_images_in_tarfile('/tmp/foo.tgz', _img_prefix)
+    #imgs, imgs_path = cvu.load_images_in_tarfile('/home/poine/work/cameras/ueye_poine_3_2019_september_30.tgz', _img_prefix)
+     
+    img_points, object_points, img_shape, rets = detect_chessboards(imgs, imgs_path, cb_size=0.025, refine_corners=False)
     cmtx, distk, rvecs, tvecs = calibrate_camera(img_points, object_points, img_shape)
     
     rep_pts, rep_errs = cvu.compute_reprojection_error(img_points, object_points, cmtx, distk, rvecs, tvecs)

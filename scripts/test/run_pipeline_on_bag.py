@@ -19,6 +19,7 @@ def run_on_bag(pipe, cam, bag_path, img_topic, odom_topic, sleep=False, talk=Fal
             img_dt = 0.01 if last_img_t is None else (img_t-last_img_t).to_sec()
             cv_img = bridge.imgmsg_to_cv2(msg, "bgr8")
             pipe.process_image(cv_img, cam, msg.header.stamp, msg.header.seq)
+            print(img_idx, pipe._res, pipe.lane_model.coefs)
             lane_mod_coefs.append(pipe.lane_model.coefs)
             pipe_times.append(img_t.to_sec())
             durations.append(pipe.last_processing_duration)
