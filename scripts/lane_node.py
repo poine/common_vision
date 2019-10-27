@@ -19,16 +19,20 @@ import two_d_guidance.trr.vision.lane_4 as trr_l4 # In progress
 
 import two_d_guidance.cfg.trr_vision_laneConfig
 
+import common_vision.rospy_utils as cv_rpu
+
 '''
 
 '''
-class Node(trr_rpu.TrrSimpleVisionPipeNode):
+#class Node(trr_rpu.TrrSimpleVisionPipeNode):
+class Node(cv_rpu.SimpleVisionPipeNode):
 
     def __init__(self):
         pipe_type = 0
         pipe_classes = [cv_l1.Contour1Pipeline, trr_l2.Contour2Pipeline, trr_l3.Contour3Pipeline, trr_l4.Foo4Pipeline ]
-        trr_rpu.TrrSimpleVisionPipeNode.__init__(self, pipe_classes[pipe_type], self.pipe_cbk)
-        
+        #trr_rpu.TrrSimpleVisionPipeNode.__init__(self, pipe_classes[pipe_type], self.pipe_cbk)
+        cv_rpu.SimpleVisionPipeNode.__init__(self, pipe_classes[pipe_type], self.pipe_cbk)
+        #trr_rpu.cam.
         # Image publishing
         self.img_pub = trr_rpu.CompressedImgPublisher(self.cam, '/vision/lane/image_debug')
         # Model publishing
