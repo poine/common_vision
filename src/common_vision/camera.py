@@ -5,11 +5,12 @@ import pdb
 import common_vision.utils as cvu
 
 # loads a camera
-def load_cam_from_files(intr_path, extr_path, cam_name='cam1', alpha=1.):
+def load_cam_from_files(intr_path, extr_path=None, cam_name='cam1', alpha=1.):
     cam = Camera(0, cam_name)
     cam.load_intrinsics(intr_path)
     cam.set_undistortion_param(alpha)
-    cam.load_extrinsics(extr_path)
+    if extr_path is not None:
+        cam.load_extrinsics(extr_path)
     return cam
 
 class Camera:

@@ -1,8 +1,21 @@
 import math, numpy as np, cv2, tf.transformations
-import glob, tarfile
+import glob, tarfile, yaml
 
 import logging
 LOG = logging.getLogger('common_vision.utils')
+
+# Read an array of points - this is used for extrinsic calibration
+def read_point(yaml_data_path):
+    with open(yaml_data_path, 'r') as stream:
+        ref_data = yaml.load(stream)
+    pts_name, pts_img, pts_world = [], [], []
+    for _name, _coords in ref_data.items():
+        pts_img.append(_coords['img'])
+        pts_world.append(_coords['world'])
+        pts_name.append(_name)
+    return pts_name, np.array(pts_img, dtype=np.float64), np.array(pts_world, dtype=np.float64)
+
+
 
 '''
 Retrieve all images (as grayscale) in the given directory
@@ -49,7 +62,7 @@ def compute_reprojection_error(img_points, object_points, cmtx, distk, rvecs, tv
     LOG.info("   min, max, rms: {:.3f} {:.3f} {:.3f} pixels".format(np.min(_sses), np.max(_sses), _rep_err_rms))
     return rep_pts, rep_errs
 
-
+# for printing on images
 def get_default_cv_text_params(): return cv2.FONT_HERSHEY_SIMPLEX, 1.25, (255, 0, 0), 2
 
 
@@ -109,3 +122,18 @@ def t_q_of_transf_msg(transf_msg):
 def _position_and_orientation_from_T(p, q, T):
     p.x, p.y, p.z = T[:3, 3]
     q.x, q.y, q.z, q.w = tf.transformations.quaternion_from_matrix(T)
+
+
+
+
+class Mask:
+    def __init__(self, cam, blf_contour=None):
+        self.mask = np.zeros((cam.h, cam.w), np.uint8)
+        if blf_contour is not None:
+            self.load_blf_contour(cam, blf_contour)
+        
+    def load_blf_contour(self, cam, blf_contour):
+        self.contour_img = cam.project(blf_contour).astype(np.int64).squeeze()
+        cv2.fillPoly(self.mask, [self.contour_img], color=255)
+
+    
