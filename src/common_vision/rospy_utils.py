@@ -1,5 +1,5 @@
 import numpy as np
-import rospy, tf2_ros, sensor_msgs.msg, cv_bridge
+import rospy, tf2_ros, sensor_msgs.msg, cv_bridge, cv2
 
 import common_vision.camera as cv_cam
 import common_vision.utils as cv_u
@@ -35,6 +35,36 @@ def retrieve_cam(cam_name, _id=0, fetch_extrinsics=True, world='world'):
     rospy.loginfo('   retrieved encoding ({})'.format(cam_img_msg.encoding))
     return cam
 
+#
+# Images
+#
+       
+class ImgPublisher:
+    def __init__(self, cam, img_topic = "/trr_vision/start_finish/image_debug"):
+        rospy.loginfo(' publishing image on ({})'.format(img_topic))
+        self.image_pub = rospy.Publisher(img_topic, sensor_msgs.msg.Image, queue_size=1)
+        self.bridge = cv_bridge.CvBridge()
+        
+    def publish(self, producer, cam, encoding="rgb8"):
+        self.image_pub.publish(self.bridge.cv2_to_imgmsg(producer.draw_debug(cam), encoding))
+
+class CompressedImgPublisher:
+    def __init__(self, cam, img_topic):
+        img_topic = img_topic + "/compressed"
+        rospy.loginfo(' publishing image on ({})'.format(img_topic))
+        self.image_pub = rospy.Publisher(img_topic, sensor_msgs.msg.CompressedImage, queue_size=1)
+        
+    def publish(self, model, data):
+        img_rgb = model.draw_debug(data)
+        self.publish2(img_rgb)
+        
+    def publish2(self, img_rgb):
+        img_bgr =  cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        msg = sensor_msgs.msg.CompressedImage()
+        msg.header.stamp = rospy.Time.now()
+        msg.format = "jpeg"
+        msg.data = np.array(cv2.imencode('.jpg', img_bgr)[1]).tostring()
+        self.image_pub.publish(msg)
 
 class CameraListener:
     def __init__(self, cam_name, cbk=None):
@@ -62,7 +92,60 @@ class CameraListener:
          self.sub = None
 
     def started(self): return self.sub is not None
-            
+
+
+class DebugImgPublisher:
+    def __init__(self, cam_name, topic_sink):
+        self.image_pub = CompressedImgPublisher(cam=None, img_topic=topic_sink)
+
+        self.img, self.compressed_img = None, None
+        self.img_src_topic = cam_name + '/image_raw/compressed'
+        #self.img_sub = rospy.Subscriber(self.img_src_topic, sensor_msgs.msg.CompressedImage, self.img_cbk,  queue_size = 1)
+        self.img_sub = None # in odred to keep network traffic down, we subscribe only when someone is listening to us
+        self.compressed_img = None
+        rospy.loginfo(' will subscribe to ({})'.format(self.img_src_topic))
+
+    def img_cbk(self, msg):
+        self.compressed_img = np.fromstring(msg.data, np.uint8)
+        
+    def publish(self, model, user_data):
+        n_subscriber = self.image_pub.image_pub.get_num_connections()
+        # don't bother drawing and publishing when no one is listening
+        if n_subscriber <= 0:
+            if self.img_sub is not None:
+                self.img_sub.unregister()
+                self.img_sub = None
+                self.compressed_img = None
+            return 
+        else:
+            if self.img_sub is None:
+                self.img_sub = rospy.Subscriber(self.img_src_topic, sensor_msgs.msg.CompressedImage, self.img_cbk,  queue_size = 1)
+
+        if self.compressed_img is not None:
+            self.img_bgr = cv2.imdecode(self.compressed_img, cv2.IMREAD_COLOR)
+            self._draw(self.img_bgr, model, user_data)
+            self.img_rgb = cv2.cvtColor(self.img_bgr, cv2.COLOR_BGR2RGB)
+            #img_rgb = self.img[...,::-1] # rgb = bgr[...,::-1] OpenCV image to Matplotlib
+            self.image_pub.publish2(self.img_rgb)
+
+####
+## Nodes
+
+class PeriodicNode:
+
+    def __init__(self, name):
+        rospy.init_node(name)
+    
+    def run(self, freq):
+        rate = rospy.Rate(freq)
+        try:
+            while not rospy.is_shutdown():
+                self.periodic()
+                rate.sleep()
+        except rospy.exceptions.ROSInterruptException:
+            pass
+
+    
 class SimpleVisionPipeNode:
     def __init__(self, pipeline_class, pipe_cbk=None):
         robot_name = rospy.get_param('~robot_name', '')
