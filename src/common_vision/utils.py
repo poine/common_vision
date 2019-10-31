@@ -1,5 +1,6 @@
 import math, numpy as np, cv2, tf.transformations
 import glob, tarfile, yaml
+import time
 
 import logging
 LOG = logging.getLogger('common_vision.utils')
@@ -137,3 +138,84 @@ class Mask:
         cv2.fillPoly(self.mask, [self.contour_img], color=255)
 
     
+
+
+
+        
+# Timing of image processing
+class Pipeline:
+    def __init__(self):
+        self.skipped_frames = 0
+        self.last_seq = None
+        self.last_stamp = None
+        self.cur_fps = 0.
+        self.min_fps, self.max_fps, self.lp_fps = np.inf, 0, 0.1
+        self.last_processing_duration = None
+        self.min_proc, self.max_proc, self.lp_proc = np.inf, 0, 1e-6
+        self.idle_t = 0.
+        self.k_lp = 0.9 # low pass coefficient
+        
+    def process_image(self, img, cam, stamp, seq):
+        if self.last_stamp is not None:
+            _dt = (stamp - self.last_stamp).to_sec()
+            if np.abs(_dt) > 1e-9:
+                self.cur_fps = 1./_dt
+                self.min_fps = np.min([self.min_fps, self.cur_fps])
+                self.max_fps = np.max([self.max_fps, self.cur_fps])
+                self.lp_fps  = self.k_lp*self.lp_fps+(1-self.k_lp)*self.cur_fps
+        self.last_stamp = stamp
+        if self.last_seq is not None:
+            self.skipped_frames += seq-self.last_seq-1
+        self.last_seq = seq
+
+        _start = time.time()
+        self._process_image(img, cam, stamp)
+        _end = time.time()
+
+        self.last_processing_duration = _end-_start
+        self.min_proc = np.min([self.min_proc, self.last_processing_duration])
+        self.max_proc = np.max([self.max_proc, self.last_processing_duration])
+        self.lp_proc = self.k_lp*self.lp_proc+(1-self.k_lp)*self.last_processing_duration
+        self.idle_t = 1./self.lp_fps - self.lp_proc
+
+    def draw_timing(self, img, x0=280, y0=20, dy=35, h=0.75, color_bgr=(220, 220, 50)):
+        f, c, w = cv2.FONT_HERSHEY_SIMPLEX, color_bgr, 2
+        try: 
+            txt = 'fps: {:.1f} (min {:.1f} max {:.1f})'.format(self.lp_fps, self.min_fps, self.max_fps)
+            cv2.putText(img, txt, (x0, y0), f, h, c, w)
+            txt = 'skipped: {:d} (cpu {:.3f}/{:.3f}s)'.format(self.skipped_frames, self.lp_proc, 1./self.lp_fps)
+            cv2.putText(img, txt, (x0, y0+dy), f, h, c, w)
+        except AttributeError: pass
+
+        
+#
+# Images
+#
+       
+class ImgPublisher:
+    def __init__(self, cam, img_topic = "/trr_vision/start_finish/image_debug"):
+        rospy.loginfo(' publishing image on ({})'.format(img_topic))
+        self.image_pub = rospy.Publisher(img_topic, sensor_msgs.msg.Image, queue_size=1)
+        self.bridge = cv_bridge.CvBridge()
+        
+    def publish(self, producer, cam, encoding="rgb8"):
+        self.image_pub.publish(self.bridge.cv2_to_imgmsg(producer.draw_debug(cam), encoding))
+
+class CompressedImgPublisher:
+    def __init__(self, cam, img_topic):
+        img_topic = img_topic + "/compressed"
+        rospy.loginfo(' publishing image on ({})'.format(img_topic))
+        self.image_pub = rospy.Publisher(img_topic, sensor_msgs.msg.CompressedImage, queue_size=1)
+        
+    def publish(self, model, data):
+        img_rgb = model.draw_debug(data)
+        self.publish2(img_rgb)
+        
+    def publish2(self, img_rgb):
+        img_bgr =  cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+        msg = sensor_msgs.msg.CompressedImage()
+        msg.header.stamp = rospy.Time.now()
+        msg.format = "jpeg"
+        msg.data = np.array(cv2.imencode('.jpg', img_bgr)[1]).tostring()
+        self.image_pub.publish(msg)
+        
