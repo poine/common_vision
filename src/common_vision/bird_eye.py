@@ -6,6 +6,14 @@ import cv2, yaml
 import shapely, shapely.geometry
 import pdb
 
+'''
+Bird Eye View.
+This object converts between camera image to the local floor plan (lfp). 
+It is able to transform the camera image into a bird eye view, as if the camera was looking straight at the floor plane.
+This transformed image is refered to as unwarped.
+For efficiency purposes, transformation tables are pre computed and can be loaded from a file.
+'''
+
 LOG = logging.getLogger('bird_eye')
 
 def _make_line(p0, p1, spacing=1, endpoint=True):
@@ -13,6 +21,8 @@ def _make_line(p0, p1, spacing=1, endpoint=True):
     n_pt = dist/spacing
     if endpoint: n_pt += 1
     return np.stack([np.linspace(p0[j], p1[j], n_pt, endpoint=endpoint) for j in range(len(p0))], axis=-1)
+    #pdb.set_trace()
+    #return np.stack([np.arange(p0[j], p1[j], spacing) for j in range(len(p0))], axis=-1)
 
 def _lines_of_corners(corners, spacing):
     return np.concatenate([_make_line(corners[i-1], corners[i], spacing=spacing, endpoint=False) for i in range(len(corners))])
@@ -26,14 +36,12 @@ class BirdEye:
     def __init__(self, cam, param):
         self._set_param(cam, param)
 
-
-
     def _set_param(self, cam, param):
         self.param = param
-        self.corners_world = np.array([(param.x0, param.dy/2, 0.), (param.x0+param.dx, param.dy/2, 0.),
+        self.corners_lfp = np.array([(param.x0, param.dy/2, 0.), (param.x0+param.dx, param.dy/2, 0.),
                                        (param.x0+ param.dx, -param.dy/2, 0.), (param.x0, -param.dy/2, 0.)])
         self._compute_cam_viewing_area(cam)
-        self._compute_H_world(cam)
+        self._compute_H_lfp(cam)
         self._compute_H_unwarped(cam)
         self._compute_image_mask(cam)
 
@@ -46,35 +54,36 @@ class BirdEye:
         cam_va_borders_fp_cam = get_points_on_plane(cam_va_borders_imp, cam.fp_n, cam.fp_d)
         in_frustum_idx = np.logical_and(cam_va_borders_fp_cam[:,2]>0, cam_va_borders_fp_cam[:,2]<max_dist)
         cam_va_borders_fp_cam = cam_va_borders_fp_cam[in_frustum_idx,:]
-        self.cam_va_borders_fp_world = np.array([np.dot(cam.cam_to_world_T[:3], p.tolist()+[1]) for p in cam_va_borders_fp_cam]) 
+        self.cam_va_borders_fp_lfp = np.array([np.dot(cam.cam_to_world_T[:3], p.tolist()+[1]) for p in cam_va_borders_fp_cam]) 
 
         # Compute intersection between camera viewing area and bird eye area
-        poly_va_blf = shapely.geometry.Polygon(self.cam_va_borders_fp_world[:,:2])
-        poly_be_blf = shapely.geometry.Polygon(self.corners_world[:,:2])
+        poly_va_blf = shapely.geometry.Polygon(self.cam_va_borders_fp_lfp[:,:2])
+        poly_be_blf = shapely.geometry.Polygon(self.corners_lfp[:,:2])
         _tmp = poly_va_blf.intersection(poly_be_blf).exterior.coords.xy
-        self.borders_isect_be_cam_world = np.zeros((len(_tmp[0]), 3))
-        self.borders_isect_be_cam_world[:,:2] = np.array(_tmp).T
+        self.borders_isect_be_cam_lfp = np.zeros((len(_tmp[0]), 3))
+        self.borders_isect_be_cam_lfp[:,:2] = np.array(_tmp).T
 
-    # Compute homography from image undistorted plan to base link footprint
-    def _compute_H_world(self, cam):
-        va_corners_img  = cam.project(self.borders_isect_be_cam_world)
+    # Compute homography from undistorted image plan to local floor plane
+    def _compute_H_lfp(self, cam):
+        va_corners_img  = cam.project(self.borders_isect_be_cam_lfp)
         va_corners_imp  = cam.undistort_points(va_corners_img)
-        self.H_world, status = cv2.findHomography(srcPoints=va_corners_imp, dstPoints=self.borders_isect_be_cam_world, method=cv2.RANSAC, ransacReprojThreshold=0.01)
-        print('computed H blf: ({}/{} inliers)\n{}'.format(np.count_nonzero(status), len(va_corners_imp), self.H_world))
+        self.H_lfp, status = cv2.findHomography(srcPoints=va_corners_imp, dstPoints=self.borders_isect_be_cam_lfp, method=cv2.RANSAC, ransacReprojThreshold=0.01)
+        print('computed H blf: ({}/{} inliers)\n{}'.format(np.count_nonzero(status), len(va_corners_imp), self.H_lfp))
 
     # Compute homography from undistorted image plan to unwarped
     def _compute_H_unwarped(self, cam):
-        va_corners_img  = cam.project(self.borders_isect_be_cam_world)
+        va_corners_img  = cam.project(self.borders_isect_be_cam_lfp)
         va_corners_imp  = cam.undistort_points(va_corners_img)
-        va_corners_unwarped = self.lfp_to_unwarped(cam, self.borders_isect_be_cam_world.squeeze())
+        va_corners_unwarped = self.lfp_to_unwarped(cam, self.borders_isect_be_cam_lfp.squeeze())
         self.H_unwarped, status = cv2.findHomography(srcPoints=va_corners_imp, dstPoints=va_corners_unwarped, method=cv2.RANSAC, ransacReprojThreshold=0.01)
         print('computed H unwarped: ({}/{} inliers)\n{}'.format( np.count_nonzero(status), len(va_corners_imp), self.H_unwarped))
 
-    # 
+    # Compute a mask representing the bird eye area, viewed on the camera image
     def _compute_image_mask(self, cam):
-        self.img_mask = cam.project(self.borders_isect_be_cam_world).squeeze()[np.newaxis].astype(np.int)
-        
-
+        # project lfp contour to image
+        cam_img_mask = cam.project(self.borders_isect_be_cam_lfp).squeeze()[np.newaxis].astype(np.int)
+        # simplify polygon by removing uneeded vertices
+        self.cam_img_mask = cv2.approxPolyDP(cam_img_mask, epsilon=1, closed=True).squeeze()[np.newaxis]
         
     # Convertions between lfp and unwarped     
     def lfp_to_unwarped(self, cam, cnt_lfp):

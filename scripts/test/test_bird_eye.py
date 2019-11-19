@@ -17,10 +17,10 @@ logging.basicConfig(level=logging.INFO)
 
 
 class BeParam:
-    x0, dx, dy = 0.3, 3., 3. # bird eye area in local floor plane frame
-    w = 640                  # bird eye image width (pixel coordinates)
-    s = dy/w                 # scale
-    h = int(dx/s)            # bird eye image height
+    x0, dx, dy = 0.29, 4., 3. # bird eye area in local floor plane frame
+    w = 640                    # bird eye image width (pixel coordinates)
+    s = dy/w                   # scale
+    h = int(dx/s)              # bird eye image height
 
 
 def plot_bird_eye_2D(be):
@@ -29,11 +29,11 @@ def plot_bird_eye_2D(be):
     car = np.array([(-0.1, 0.1), (0.2, 0.1), (0.2, -0.1), (-0.1, -0.1), (-0.1, 0.1)])
     plt.plot(car[:,0], car[:,1], label='car')
     # plot the outline of the camera viewing area
-    plt.plot(be.cam_va_borders_fp_world[:,0], be.cam_va_borders_fp_world[:,1], label='camera viewing area')
+    plt.plot(be.cam_va_borders_fp_lfp[:,0], be.cam_va_borders_fp_lfp[:,1], label='camera viewing area')
     # plot the outline of the bird eye area
-    plt.plot(be.corners_world[:,0], be.corners_world[:,1], label='bird eye area')
+    plt.plot(be.corners_lfp[:,0], be.corners_lfp[:,1], label='bird eye area')
     # plot intersection of cam viewing area and bird eye area
-    plt.plot(be.borders_isect_be_cam_world[:,0], be.borders_isect_be_cam_world[:,1], label='intersection') 
+    plt.plot(be.borders_isect_be_cam_lfp[:,0], be.borders_isect_be_cam_lfp[:,1], label='intersection') 
     ax.axis('equal')
     ax.xaxis.set_label_text('front')
     ax.yaxis.set_label_text('left')
@@ -46,7 +46,7 @@ def display_unwarped(be, cam):
     unwarped = be.undist_unwarp_img(img, cam)
     #foo = np.array([[(0, 0), (200, 200), (100, 200)]])
     #cv2.polylines(img, foo, isClosed=True, color=(0, 0, 255), thickness=2)
-    cv2.polylines(img, be.img_mask, isClosed=True, color=(0, 0, 255), thickness=2)
+    cv2.polylines(img, be.cam_img_mask, isClosed=True, color=(0, 0, 255), thickness=2)
                     
     cv2.imshow('camera', img)
     cv2.imshow('unwarped', unwarped)
@@ -60,8 +60,8 @@ def test_christine():
 
     be = cv_be.BirdEye(cam, BeParam())
 
-    #plot_bird_eye_2D(be)
-    #plt.show()
+    plot_bird_eye_2D(be)
+    plt.show()
     display_unwarped(be, cam)
     
 
