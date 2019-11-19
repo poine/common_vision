@@ -8,7 +8,6 @@ import tf.transformations
 import common_vision.utils as cv_u
 import common_vision.plot_utils as cv_pu
 import common_vision.camera as cv_c
-#import utils
 
 import pdb
 
@@ -104,6 +103,7 @@ def print_caml_transforms(ref_to_camo_T):
     rpy = np.array(tf.transformations.euler_from_matrix(caml_to_ref_T, 'sxyz'))
     #pdb.set_trace()
     xyz = caml_to_ref_T[:3,3]
+    print('caml_to_ref (for use in robot urdf)')
     print( 'rpy {}'.format(rpy))
     print( 'xyz {}'.format(xyz))
 
