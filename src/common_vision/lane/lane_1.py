@@ -6,6 +6,7 @@ import two_d_guidance.trr.utils as trru
 import common_vision.utils as cv_u
 
 import pdb
+
 # TODO: use multiple contours rather than larger one?
 class Contour1Pipeline(trr_vu.Pipeline):
     show_none, show_input, show_thresh, show_contour, show_be = range(5)
@@ -24,6 +25,14 @@ class Contour1Pipeline(trr_vu.Pipeline):
                                 [1.5*np.linalg.norm([1.5, 1.4]), 0, 0],
                                 [1.5,  1.4 , 0],
                                 [0.29,  0.23, 0]])
+
+        contour_lfp = np.array([[0.208, -0.15, 0],
+                                [1.5, -1.4 , 0],
+                                [1.5*np.linalg.norm([1.5, 1.4]), 0, 0],
+                                [1.5,  1.4 , 0],
+                                [0.20,  0.165, 0]])
+
+        
         self.mask = cv_u.Mask(cam, contour_lfp)
 
     def set_roi(self, tl, br):

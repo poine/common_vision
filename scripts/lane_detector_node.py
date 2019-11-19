@@ -32,7 +32,6 @@ class Node(cv_rpu.SimpleVisionPipeNode):
         pipe_classes = [cv_l1.Contour1Pipeline, trr_l2.Contour2Pipeline, trr_l3.Contour3Pipeline, trr_l4.Foo4Pipeline ]
         #trr_rpu.TrrSimpleVisionPipeNode.__init__(self, pipe_classes[pipe_type], self.pipe_cbk)
         cv_rpu.SimpleVisionPipeNode.__init__(self, pipe_classes[pipe_type], self.pipe_cbk)
-        #trr_rpu.cam.
         # Image publishing
         self.img_pub = trr_rpu.CompressedImgPublisher(self.cam, '/vision/lane/image_debug')
         # Model publishing
@@ -40,6 +39,7 @@ class Node(cv_rpu.SimpleVisionPipeNode):
         self.lane_model = trru.LaneModel()
         self.cfg_srv = dynamic_reconfigure.server.Server(two_d_guidance.cfg.trr_vision_laneConfig, self.cfg_callback)
         self.status_pub = trr_rpu.VisionLaneStatusPublisher('/vision/lane/status', who='vision_lane_node')
+        #self.pipeline.thresholder.set_threshold(200)
         # start image subscription only here
         self.start()
         

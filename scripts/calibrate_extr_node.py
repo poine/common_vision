@@ -5,10 +5,12 @@ import cv2
 
 
 import common_vision.rospy_utils as cv_rpu
+import common_vision.utils as cv_u
+
 import two_d_guidance.trr.vision.utils as trr_vu
 
 
-
+import pdb
 
 class ImgPublisher(cv_rpu.DebugImgPublisher):
     def __init__(self, img_topic, cam_name):
@@ -23,9 +25,22 @@ class ImgPublisher(cv_rpu.DebugImgPublisher):
                                 [1.5, -1.4 , 0],
                                 [1.5*np.linalg.norm([1.5, 1.4]), 0, 0],
                                 [1.5,  1.4 , 0],
-                                [0.29,  0.23, 0]])
+                                [0.15,  0.23, 0]])
+        contour_lfp = np.array([[0.208, -0.15, 0],
+                                [1.5, -1.4 , 0],
+                                [1.5*np.linalg.norm([1.5, 1.4]), 0, 0],
+                                [1.5,  1.4 , 0],
+                                [0.20,  0.165, 0]])
         contour_img = model.cam.project(contour_lfp).astype(np.int64)
         cv2.polylines(img_bgr, [contour_img] , isClosed=True, color=(0, 255, 255), thickness=2)
+        # Draw keypoint on image, write their names and coordinates
+        pts_name, pts_img, pts_world = model.pts_name, model.pts_img, model.pts_world
+        for i, p in enumerate(pts_img.astype(int)):
+            cv2.circle(img_bgr, tuple(p), 1, (0,255,0), -1)
+            cv2.putText(img_bgr, '{}'.format(pts_name[i][:1]), tuple(p), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 2)
+            cv2.putText(img_bgr, '{}'.format(pts_world[i][:2]), tuple(p+[0, 25]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 1)
+        for i, p in enumerate(model.rep_pts.astype(int)):
+            cv2.circle(img_bgr, tuple(p), 1, (0,0,255), -1)
         #print model, data
         
 class NonePipeline(trr_vu.Pipeline):
@@ -47,6 +62,12 @@ class Node(cv_rpu.SimpleVisionPipeNode):
         cv_rpu.SimpleVisionPipeNode.__init__(self, NonePipeline, self.pipe_cbk)
         self.img_pub = cv_rpu.ImgPublisher(self.cam, '/vision/calibrate_extr')
         self.img_pub2 = ImgPublisher("/vision/calibrate_2", self.cam_name)
+        # load keypoints
+        points_path = '/home/poine/work/roverboard/roverboard_caroline/config/ext_calib_pts_floor_tiles_ricou_01.yaml'
+        self.pts_name, self.pts_img, self.pts_world = cv_u.read_point(points_path)
+       
+        self.rep_pts = self.cam.project(self.pts_world).squeeze()
+        #pdb.set_trace()
         self.start()
 
     def pipe_cbk(self):

@@ -19,8 +19,6 @@ def calibrate_extrinsics(cam_intrinsics_path, points_path):
 
     # load camera intrinsics
     cam = cv_c.load_cam_from_files(cam_intrinsics_path)
-
-    #camera_matrix, dist_coeffs, w, h = utils.load_camera_model(cam_intrinsics_path)
     # load keypoints
     pts_name, pts_img, pts_world = cv_u.read_point(points_path)
     # run PnP to obtain camera pose

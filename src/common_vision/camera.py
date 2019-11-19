@@ -23,6 +23,7 @@ class Camera:
         self.cam_to_world_T = None
         # image encoding
         self.img_encoding = encoding
+        self.camo_frame = '{}_optical_frame'.format(name)
         
     def set_calibration(self, K, D, w, h):
         self.K, self.D, self.w, self.h = K, D, w, h

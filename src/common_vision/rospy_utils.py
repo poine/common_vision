@@ -67,11 +67,10 @@ class CompressedImgPublisher:
         self.image_pub.publish(msg)
 
 class CameraListener:
-    def __init__(self, cam_name, cbk=None):
+    def __init__(self, cam_name, cbk=None, img_fmt="passthrough"):
         self.cam_name, self.img_cbk = cam_name, cbk
         self.bridge = cv_bridge.CvBridge()
-        self.img = None
-        self.sub = None
+        self.img, self.sub, self.img_fmt = None, None, img_fmt
         
     def start(self):
         self.cam_img_topic = '/{}/image_raw'.format(self.cam_name)
@@ -80,7 +79,7 @@ class CameraListener:
 
     def img_callback(self, msg):
         try:
-            self.img = self.bridge.imgmsg_to_cv2(msg, "passthrough")
+            self.img = self.bridge.imgmsg_to_cv2(msg, self.img_fmt)
             if self.img_cbk is not None:
                 self.img_cbk(self.img, (msg.header.stamp, msg.header.seq))
         except cv_bridge.CvBridgeError as e:
@@ -147,7 +146,7 @@ class PeriodicNode:
 
     
 class SimpleVisionPipeNode:
-    def __init__(self, pipeline_class, pipe_cbk=None):
+    def __init__(self, pipeline_class, pipe_cbk=None, img_fmt="passthrough"):
         robot_name = rospy.get_param('~robot_name', '')
         def prefix(robot_name, what): return what if robot_name == '' else '{}/{}'.format(robot_name, what)
         self.cam_name = rospy.get_param('~camera', prefix(robot_name, 'camera_road_front'))
@@ -156,7 +155,7 @@ class SimpleVisionPipeNode:
         self.cam = retrieve_cam(self.cam_name, fetch_extrinsics=True, world=self.ref_frame)
         self.cam.set_undistortion_param(alpha=1.)
 
-        self.cam_lst = CameraListener(self.cam_name, self.on_image)
+        self.cam_lst = CameraListener(self.cam_name, self.on_image, img_fmt)
         self.pipeline = pipeline_class(self.cam, robot_name)
 
 
