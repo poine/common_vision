@@ -43,10 +43,11 @@ class NonePipeline(trr_vu.Pipeline):
 class Node(cv_rpu.SimpleVisionPipeNode):
 
     def __init__(self):
-       cv_rpu.SimpleVisionPipeNode.__init__(self, NonePipeline, self.pipe_cbk)
-       self.img_pub = cv_rpu.ImgPublisher(self.cam, '/vision/calibrate_extr')
-       self.img_pub2 = ImgPublisher("/vision/calibrate_2", self.cam_name)
-       self.start()
+        # will load a camera (~camera and ~ref_frame)
+        cv_rpu.SimpleVisionPipeNode.__init__(self, NonePipeline, self.pipe_cbk)
+        self.img_pub = cv_rpu.ImgPublisher(self.cam, '/vision/calibrate_extr')
+        self.img_pub2 = ImgPublisher("/vision/calibrate_2", self.cam_name)
+        self.start()
 
     def pipe_cbk(self):
         self.img_pub.publish(self, self.cam, "bgr8")
