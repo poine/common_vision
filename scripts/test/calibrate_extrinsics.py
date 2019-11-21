@@ -61,7 +61,7 @@ def draw_result_3D(ref_to_cam_T, pts_world=None, pts_name=None):
 
 def write_yaml(filename, ref_to_camo_T, comment=None):
     LOG.info("saving calibration to {}".format(filename))
-    ref_to_camo_t, ref_to_camo_q = utils.tq_of_T(ref_to_camo_T)
+    ref_to_camo_t, ref_to_camo_q = cv_u.tq_of_T(ref_to_camo_T)
     with open(filename, 'w') as f:
         if comment is not None:  f.write('# {}\n'.format(comment))
         f.write('ref_to_camo_t: {}\n'.format(", ".join(["{:.8f}".format(ref_to_camo_t[i]) for i in range(len(ref_to_camo_t))])))
@@ -130,6 +130,7 @@ def test_caroline():
     draw_result_image(img_file, pts_name, pts_img, pts_world, rep_pts_img)
     #draw_result_3D(world_to_camo_T, pts_world, pts_name)
 
+    
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     #test_caml_to_camo()

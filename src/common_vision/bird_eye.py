@@ -8,10 +8,10 @@ import pdb
 
 '''
 Bird Eye View.
-This object converts between camera image to the local floor plan (lfp). 
+This object converts between camera image to the local floor plane (lfp). 
 It is able to transform the camera image into a bird eye view, as if the camera was looking straight at the floor plane.
 This transformed image is refered to as unwarped.
-For efficiency purposes, transformation tables are pre computed and can be loaded from a file.
+For efficiency purposes, transformation tables are pre computed. As this computation is expensice, tables can be loaded from filesystem.
 '''
 
 LOG = logging.getLogger('bird_eye')
@@ -63,14 +63,14 @@ class BirdEye:
         self.borders_isect_be_cam_lfp = np.zeros((len(_tmp[0]), 3))
         self.borders_isect_be_cam_lfp[:,:2] = np.array(_tmp).T
 
-    # Compute homography from undistorted image plan to local floor plane
+    # Compute homography from undistorted image plane to local floor plane
     def _compute_H_lfp(self, cam):
         va_corners_img  = cam.project(self.borders_isect_be_cam_lfp)
         va_corners_imp  = cam.undistort_points(va_corners_img)
         self.H_lfp, status = cv2.findHomography(srcPoints=va_corners_imp, dstPoints=self.borders_isect_be_cam_lfp, method=cv2.RANSAC, ransacReprojThreshold=0.01)
         print('computed H blf: ({}/{} inliers)\n{}'.format(np.count_nonzero(status), len(va_corners_imp), self.H_lfp))
 
-    # Compute homography from undistorted image plan to unwarped
+    # Compute homography from undistorted image plane to unwarped
     def _compute_H_unwarped(self, cam):
         va_corners_img  = cam.project(self.borders_isect_be_cam_lfp)
         va_corners_imp  = cam.undistort_points(va_corners_img)
@@ -80,10 +80,16 @@ class BirdEye:
 
     # Compute a mask representing the bird eye area, viewed on the camera image
     def _compute_image_mask(self, cam):
-        # project lfp contour to image
+        # project lfp contour to cam image
         cam_img_mask = cam.project(self.borders_isect_be_cam_lfp).squeeze()[np.newaxis].astype(np.int)
         # simplify polygon by removing uneeded vertices
         self.cam_img_mask = cv2.approxPolyDP(cam_img_mask, epsilon=1, closed=True).squeeze()[np.newaxis]
+        # transform lfp contour to unwarped
+        unwarped_img_mask = self.lfp_to_unwarped(cam, self.borders_isect_be_cam_lfp)[np.newaxis].astype(np.int)
+        # simplify polygon by removing uneeded vertices
+        self.unwarped_img_mask = cv2.approxPolyDP(unwarped_img_mask, epsilon=1, closed=True).squeeze()[np.newaxis]
+
+        
         
     # Convertions between lfp and unwarped     
     def lfp_to_unwarped(self, cam, cnt_lfp):

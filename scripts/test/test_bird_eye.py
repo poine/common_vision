@@ -43,11 +43,13 @@ def plot_bird_eye_2D(be):
 def display_unwarped(be, cam):
     img_path = '/home/poine/work/robot_data/christine/vedrines_track/frame_000000.png'
     img =  cv2.imread(img_path, cv2.IMREAD_COLOR)
-    unwarped = be.undist_unwarp_img(img, cam)
     #foo = np.array([[(0, 0), (200, 200), (100, 200)]])
     #cv2.polylines(img, foo, isClosed=True, color=(0, 0, 255), thickness=2)
     cv2.polylines(img, be.cam_img_mask, isClosed=True, color=(0, 0, 255), thickness=2)
-                    
+
+    unwarped = be.undist_unwarp_img(img, cam)
+    cv2.polylines(unwarped, be.unwarped_img_mask, isClosed=True, color=(0, 0, 255), thickness=2)
+    
     cv2.imshow('camera', img)
     cv2.imshow('unwarped', unwarped)
     cv2.waitKey(0)
