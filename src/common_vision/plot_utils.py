@@ -57,6 +57,24 @@ def draw_points(ax, pts_coord, pts_id):
         annotate3D(ax, s=str(_id), xyz=coor, fontsize=10, xytext=(-3,3),
                    textcoords='offset points', ha='right',va='bottom')
 
+def draw_camera(ax, T_c_to_w__c, id=None, color='k'):
+    ''' draw a camera as a pyramid '''
+    draw_thriedra(ax, T_c_to_w__c, scale=0.1, id=id)
+    w, h, d = 0.1, 0.05, 0.25
+    pts_c = [[ 0,  0, 0, 1],
+             [ w,  h, d, 1],
+             [-w,  h, d, 1],
+             [ 0,  0, 0, 1],
+             [ w, -h, d, 1],
+             [-w, -h, d, 1],
+             [ 0,  0, 0, 1],
+             [ w,  h, d, 1],
+             [ w, -h, d, 1],
+             [-w, -h, d, 1],
+             [-w,  h, d, 1]]
+    pts_w = np.array([np.dot(T_c_to_w__c, pt_c) for pt_c in pts_c])
+    ax.plot(pts_w[:,0], pts_w[:,1], pts_w[:,2], color=color)
+
 def set_3D_axes_equal(ax=None):
     '''
     Make axes of 3D plot have equal scale so that spheres appear as spheres,

@@ -45,7 +45,7 @@ class BirdEye:
         self._compute_H_unwarped(cam)
         self._compute_image_mask(cam)
 
-    def _compute_cam_viewing_area(self, cam, max_dist=6):
+    def _compute_cam_viewing_area(self, cam, max_dist=20):
         # Compute the contour of the intersection between camera frustum and floor plane (cliping to max_dist)
         cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h], [0, 0]])
         cam_va_borders_img = _lines_of_corners(cam_va_corners_img, spacing=1)

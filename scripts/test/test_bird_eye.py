@@ -22,6 +22,11 @@ class BeParam:
     s = dy/w                   # scale
     h = int(dx/s)              # bird eye image height
 
+class BeParamJulie:
+    x0, dx, dy = 2.7, 15., 8.   # bird eye area in local floor plane frame
+    w = 640                    # bird eye image width (pixel coordinates)
+    s = dy/w                   # scale
+    h = int(dx/s)              # bird eye image height
 
 def plot_bird_eye_2D(be):
     ax = plt.gca()
@@ -40,8 +45,7 @@ def plot_bird_eye_2D(be):
     plt.legend()
         
 
-def display_unwarped(be, cam):
-    img_path = '/home/poine/work/robot_data/christine/vedrines_track/frame_000000.png'
+def display_unwarped(be, cam, img_path):
     img =  cv2.imread(img_path, cv2.IMREAD_COLOR)
     #foo = np.array([[(0, 0), (200, 200), (100, 200)]])
     #cv2.polylines(img, foo, isClosed=True, color=(0, 0, 255), thickness=2)
@@ -64,15 +68,24 @@ def test_christine():
 
     plot_bird_eye_2D(be)
     plt.show()
-    display_unwarped(be, cam)
+    img_path = '/home/poine/work/robot_data/christine/vedrines_track/frame_000000.png'
+    display_unwarped(be, cam, img_path)
     
 
+def test_julie():
+    intr_cam_calib_path = '/home/poine/work/robot_data/julie/julie_short_range_intr.yaml'
+    extr_cam_calib_path = '/home/poine/work/robot_data/julie/julie_short_range_extr.yaml'
+    cam = cv_c.load_cam_from_files(intr_cam_calib_path, extr_cam_calib_path) 
+    be = cv_be.BirdEye(cam, BeParamJulie())
 
-    
+    plot_bird_eye_2D(be)
+    plt.show()
+    img_path = '/home/poine/work/robot_data/julie/julie_extr_calib_1.png'
+    display_unwarped(be, cam, img_path)
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     LOG.info(" using opencv version: {}".format(cv2.__version__))
-    test_christine()
-    
+    #test_christine()
+    test_julie()
