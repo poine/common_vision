@@ -1,5 +1,6 @@
 import numpy as np
 import rospy, tf2_ros, sensor_msgs.msg, cv_bridge, cv2
+import sensor_msgs.msg, geometry_msgs.msg, visualization_msgs.msg, tf
 
 import common_vision.camera as cv_cam
 import common_vision.utils as cv_u
@@ -127,6 +128,133 @@ class DebugImgPublisher:
             #img_rgb = self.img[...,::-1] # rgb = bgr[...,::-1] OpenCV image to Matplotlib
             self.image_pub.publish2(self.img_rgb)
 
+
+### Transforms, stolen from pat3 to avoid dependency
+
+
+class TransformPublisher:
+    def __init__(self):
+        self.tfBcaster = tf2_ros.TransformBroadcaster()
+        # FIXME, use that for ENU to NED
+        self.static_tfBcaster = tf2_ros.StaticTransformBroadcaster()
+        self.tfBuffer  = tf2_ros.Buffer()
+        self.tfLstener = tf2_ros.TransformListener(self.tfBuffer)
+
+    def publish(self, t, T_w2b):
+        self.send_w_enu_to_ned_transform(t)
+        if T_w2b is not None: self.send_w_ned_to_b_transform(t, T_w2b) 
+    
+    def send_w_enu_to_ned_transform(self, t):
+        R_enu2ned = np.array([[0, 1, 0], [1, 0, 0], [0, 0, -1]])
+        T_enu2ned = np.eye(4); T_enu2ned[:3,:3] = R_enu2ned
+        self.send_transform("w_enu", "w_ned", t, T_enu2ned, static=True)
+
+    def send_w_ned_to_b_transform(self, t, T_w2b):
+        self.send_transform("w_ned", "b_frd", t, T_w2b)
+
+    def send_w_enu_to_b_transform(self, t, T_w2b):
+        self.send_transform("w_enu", "b_frd", t, T_w2b)
+
+    def send_b_to_a_transform(self, t, T_b2a):
+        self.send_transform("b_frd", "a_ab", t, T_b2a)
+        
+    def send_transform(self, f1, f2, t, T_f1tof2, static=False):
+        tf_msg = geometry_msgs.msg.TransformStamped()
+        tf_msg.header.frame_id = f1
+        tf_msg.child_frame_id = f2
+        tf_msg.header.stamp = t
+        _r = tf_msg.transform.rotation
+        _r.x, _r.y, _r.z, _r.w = tf.transformations.quaternion_from_matrix(T_f1tof2)
+        _t = tf_msg.transform.translation
+        _t.x, _t.y, _t.z = T_f1tof2[:3,3]
+        if static:
+            self.static_tfBcaster.sendTransform(tf_msg)
+        else:
+            self.tfBcaster.sendTransform(tf_msg)
+
+
+
+
+### Markers stolen from pat3
+class MarkerArrayPublisher:
+    def __init__(self, topic, meshes, colors=[[0.2, 1., 0.2, 0.5]], scales=[(1., 1., 1.)], frame_id="w_ned"):
+        self.meshes = meshes
+        self.pub = rospy.Publisher(topic, visualization_msgs.msg.MarkerArray, queue_size=1)
+        self.msg = visualization_msgs.msg.MarkerArray()
+        for i, (mesh, color, scale) in enumerate(zip(meshes, colors, scales)):
+            marker = visualization_msgs.msg.Marker()
+            marker.header.frame_id = frame_id
+            marker.type = marker.MESH_RESOURCE
+            marker.action = marker.ADD
+            marker.id = i
+            #marker.text = "{}".format(i)
+            marker.scale.x, marker.scale.y, marker.scale.z = scale
+            marker.color.r, marker.color.g, marker.color.b, marker.color.a  = color
+            #p = marker.pose.position; p.x, p.y, p.z = 0.3, 0, 0
+            marker.mesh_resource = mesh
+            marker.mesh_use_embedded_materials = True
+            self.msg.markers.append(marker)
+        
+    def publish(self, T_ned2bs, delete=False):
+        for marker, T_ned2b in zip(self.msg.markers, T_ned2bs):
+            marker.action = marker.DELETE if delete else marker.ADD
+            _position_and_orientation_from_T(marker.pose.position, marker.pose.orientation, T_ned2b)
+        self.pub.publish(self.msg)
+
+class PoseArrayPublisher(MarkerArrayPublisher):
+    def __init__(self, topic='/pat/vehicle_marker', dae='quad.dae', scales=[(1., 1., 1.)], frame_id="w_ned"):
+        MarkerArrayPublisher.__init__(self, topic,  ["package://ros_pat/media/{}".format(dae)], scales=scales, frame_id=frame_id)
+
+
+#
+# Algebra/Transforms, stolen from pat3
+#
+
+
+def _position_and_orientation_from_T(p, q, T):
+    p.x, p.y, p.z = T[:3, 3]
+    q.x, q.y, q.z, q.w = tf.transformations.quaternion_from_matrix(T)
+
+# Transforms
+def T_of_t_rpy(t, rpy):
+    T = tf.transformations.euler_matrix(rpy[0], rpy[1], rpy[2], 'sxyz')
+    T[:3,3] = t
+    return T
+
+def t_rpy_of_T(T):
+    t = T[:3,3]
+    rpy = tf.transformations.euler_from_matrix(T, 'sxyz')
+    return t, rpy
+
+def T_of_t_q(t, q):
+    T = tf.transformations.quaternion_matrix(q)
+    T[:3,3] = t
+    return T
+
+def T_of_t_R(t, R):
+    T = np.eye(4); T[:3,:3] = R; T[:3,3] = t
+    return T
+
+def T_of_t_r(t, r):
+    R, _ = cv2.Rodrigues(r)
+    return T_of_t_R(t, R)
+
+def tq_of_T(T):
+    return T[:3, 3], tf.transformations.quaternion_from_matrix(T)
+
+def tR_of_T(T):
+    return T[:3,3], T[:3,:3]
+
+def tr_of_T(T):
+    ''' return translation and rodrigues angles from a 4x4 transform matrix '''
+    r, _ = cv2.Rodrigues(T[:3,:3])
+    return T[:3,3], r.squeeze()
+
+
+def transform(a_to_b_T, p_a):
+    return np.dot(a_to_b_T[:3,:3], p_a) + a_to_b_T[:3,3]
+
+            
 ####
 ## Nodes
 
@@ -146,13 +274,13 @@ class PeriodicNode:
 
     
 class SimpleVisionPipeNode:
-    def __init__(self, pipeline_class, pipe_cbk=None, img_fmt="passthrough"):
+    def __init__(self, pipeline_class, pipe_cbk=None, img_fmt="passthrough", fetch_extrinsics=True):
         robot_name = rospy.get_param('~robot_name', '')
         def prefix(robot_name, what): return what if robot_name == '' else '{}/{}'.format(robot_name, what)
         self.cam_name = rospy.get_param('~camera', prefix(robot_name, 'camera_road_front'))
         self.ref_frame = rospy.get_param('~ref_frame', prefix(robot_name, 'base_link_footprint'))
 
-        self.cam = retrieve_cam(self.cam_name, fetch_extrinsics=True, world=self.ref_frame)
+        self.cam = retrieve_cam(self.cam_name, fetch_extrinsics=fetch_extrinsics, world=self.ref_frame)
         self.cam.set_undistortion_param(alpha=1.)
 
         self.cam_lst = CameraListener(self.cam_name, self.on_image, img_fmt)

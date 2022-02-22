@@ -1,4 +1,10 @@
-import numpy as np, cv2, tf
+import numpy as np, cv2
+
+try:
+    import tf
+except ImportError:
+    print('can not find tf')
+    
 import yaml
 import sensor_msgs.msg # bummer...
 import pdb
@@ -87,7 +93,7 @@ class Camera:
         
         
     def load_all(self, kwargs):
-        print kwargs
+        print(kwargs)
         self.load_intrinsics(kwargs['intrinsics'])
         self.set_encoding(kwargs['encoding'])
         t_world_to_camo_t = np.array(kwargs['world_to_camo_t'])
@@ -185,3 +191,10 @@ def load_extrinsics(filename, verbose=False):
     ref_to_camo_t = np.fromstring(_data['ref_to_camo_t'], sep=',')
     ref_to_camo_q = np.fromstring(_data['ref_to_camo_q'], sep=',')
     return ref_to_camo_t, ref_to_camo_q
+
+def write_extrinsics(filename, ref_to_cam_t, ref_to_cam_q):
+    txt_t = ','.join(["{:.12f}".format(i) for i in  np.array(ref_to_cam_t)])
+    txt_q = ','.join(["{:.12f}".format(i) for i in  np.array(ref_to_cam_q)])
+    txt = '# extrinsics (ref to camera optical frame transform)\nref_to_camo_t: {}\nref_to_camo_q: {}\n'.format(txt_t, txt_q)
+    with open(filename, 'w') as f:
+        f.write(txt)

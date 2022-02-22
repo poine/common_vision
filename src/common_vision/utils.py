@@ -1,6 +1,13 @@
-import math, numpy as np, cv2, tf.transformations
-import glob, tarfile, yaml
+import math, numpy as np, cv2
+try:
+    import tf.transformations
+except ImportError:
+    print('common_vision.utils.py: can not find tf')
+    
+import os, glob, tarfile, yaml
 import time
+
+import pdb
 
 import logging
 LOG = logging.getLogger('common_vision.utils')
@@ -21,11 +28,21 @@ def read_point(yaml_data_path):
 '''
 Retrieve all images (as grayscale) in the given directory
 '''
-def load_images_in_dir(_dir, _prefix, read_as=cv2.IMREAD_GRAYSCALE):
+def load_images_in_dir(_dir, _prefix, read_as=cv2.IMREAD_GRAYSCALE, idxs=None):
     img_glob = '{}/{}*'.format(_dir, _prefix)
     LOG.info(" loading images: {}".format(img_glob))
     img_path = glob.glob(img_glob)
     img_path.sort()
+    if idxs is not None:
+        new_path = []
+        for path in img_path:
+            base = os.path.basename(path)
+            noext = os.path.splitext(base)[0]
+            if int(noext.split('_')[-1])  in idxs:
+                new_path.append(path)
+                #pdb.set_trace()
+                #print(noext)
+        img_path = new_path
     LOG.info(" found {} images".format(len(img_path)))
     images = [cv2.imread(p, read_as) for p in img_path]
     return images, img_path
@@ -76,6 +93,66 @@ def norm_angle(_a):
     return _a
 
 
+# fucked up python 2 vs 3
+import numpy
+# epsilon for testing whether a number is close to zero
+_EPS = numpy.finfo(float).eps * 4.0
+def quaternion_matrix(quaternion):
+    """Return homogeneous rotation matrix from quaternion.
+
+    >>> R = quaternion_matrix([0.06146124, 0, 0, 0.99810947])
+    >>> numpy.allclose(R, rotation_matrix(0.123, (1, 0, 0)))
+    True
+
+    """
+    q = numpy.array(quaternion[:4], dtype=numpy.float64, copy=True)
+    nq = numpy.dot(q, q)
+    if nq < _EPS:
+        return numpy.identity(4)
+    q *= math.sqrt(2.0 / nq)
+    q = numpy.outer(q, q)
+    return numpy.array((
+        (1.0-q[1, 1]-q[2, 2],     q[0, 1]-q[2, 3],     q[0, 2]+q[1, 3], 0.0),
+        (    q[0, 1]+q[2, 3], 1.0-q[0, 0]-q[2, 2],     q[1, 2]-q[0, 3], 0.0),
+        (    q[0, 2]-q[1, 3],     q[1, 2]+q[0, 3], 1.0-q[0, 0]-q[1, 1], 0.0),
+        (                0.0,                 0.0,                 0.0, 1.0)
+        ), dtype=numpy.float64)
+
+def quaternion_from_matrix(matrix):
+    """Return quaternion from rotation matrix.
+
+    >>> R = rotation_matrix(0.123, (1, 2, 3))
+    >>> q = quaternion_from_matrix(R)
+    >>> numpy.allclose(q, [0.0164262, 0.0328524, 0.0492786, 0.9981095])
+    True
+
+    """
+    q = numpy.empty((4, ), dtype=numpy.float64)
+    M = numpy.array(matrix, dtype=numpy.float64, copy=False)[:4, :4]
+    t = numpy.trace(M)
+    if t > M[3, 3]:
+        q[3] = t
+        q[2] = M[1, 0] - M[0, 1]
+        q[1] = M[0, 2] - M[2, 0]
+        q[0] = M[2, 1] - M[1, 2]
+    else:
+        i, j, k = 0, 1, 2
+        if M[1, 1] > M[0, 0]:
+            i, j, k = 1, 2, 0
+        if M[2, 2] > M[i, i]:
+            i, j, k = 2, 0, 1
+        t = M[i, i] - (M[j, j] + M[k, k]) + M[3, 3]
+        q[i] = t
+        q[j] = M[i, j] + M[j, i]
+        q[k] = M[k, i] + M[i, k]
+        q[3] = M[k, j] - M[j, k]
+    q *= 0.5 / math.sqrt(t * M[3, 3])
+    return q
+
+
+
+
+
 # Transforms
 def T_of_t_rpy(t, rpy):
     T = tf.transformations.euler_matrix(rpy[0], rpy[1], rpy[2], 'sxyz')
@@ -88,7 +165,8 @@ def t_rpy_of_T(T):
     return t, rpy
 
 def T_of_t_q(t, q):
-    T = tf.transformations.quaternion_matrix(q)
+    #T = tf.transformations.quaternion_matrix(q)
+    T = quaternion_matrix(q)
     T[:3,3] = t
     return T
 
@@ -101,7 +179,8 @@ def T_of_t_r(t, r):
     return T_of_t_R(t, R)
 
 def tq_of_T(T):
-    return T[:3, 3], tf.transformations.quaternion_from_matrix(T)
+    #return T[:3, 3], tf.transformations.quaternion_from_matrix(T)
+    return T[:3, 3], quaternion_from_matrix(T)
 
 def tR_of_T(T):
     return T[:3,3], T[:3,:3]
@@ -123,6 +202,9 @@ def t_q_of_transf_msg(transf_msg):
 def _position_and_orientation_from_T(p, q, T):
     p.x, p.y, p.z = T[:3, 3]
     q.x, q.y, q.z, q.w = tf.transformations.quaternion_from_matrix(T)
+def _T_from_landmark_transform(lmt): # cartographer_ros_msgs.msg.LandmarkList
+    return  T_of_t_q(list_of_position(lmt.position), list_of_orientation(lmt.orientation))
+    
 
 
 
@@ -187,6 +269,8 @@ class Pipeline:
             cv2.putText(img, txt, (x0, y0+dy), f, h, c, w)
         except AttributeError: pass
 
+    def draw_debug(self, cam, img_cam=None):
+        return cv2.cvtColor(self.draw_debug_bgr(cam, img_cam), cv2.COLOR_BGR2RGB)
         
 #
 # Images
@@ -219,3 +303,28 @@ class CompressedImgPublisher:
         msg.data = np.array(cv2.imencode('.jpg', img_bgr)[1]).tostring()
         self.image_pub.publish(msg)
         
+
+
+
+# display a downscaled version of an image
+def imshow_scaled(img, txt="", max_size=1500):
+    scale = max_size/max(img.shape)
+    if scale < 1:
+        img2 = cv2.resize(img, (int(img.shape[1]*scale), int(img.shape[0]*scale)))
+    else:
+        img2 = img
+    cv2.imshow(txt, img2)
+
+# display images as mosaic
+def imshow_mosaic(imgs, txt, size=640, ncol=2):
+    nrow = int(np.ceil(len(imgs)/ncol))
+    iw, ih = imgs[0].shape[:2]
+    scale = size/max([iw, ih])
+    miw, mih = int(iw*scale), int(ih*scale) 
+    blank_image = np.zeros(shape=[ncol*miw, nrow*mih, 3], dtype=np.uint8)
+    for i in range(len(imgs)):
+        _im =  cv2.resize(imgs[i], (mih, miw))
+        ic, ir = i%ncol, int(i/ncol)
+        blank_image[ir*miw:(ir+1)*miw, ic*mih:(ic+1)*mih] = _im
+    
+    cv2.imshow(txt, blank_image)
