@@ -35,6 +35,12 @@ class BeParamSmocap:
     s = dy/w                             # scale
     h = int(dx/s)                        # bird eye image height
 
+class BeParamTrilopi:
+    x0, y0, dx, dy = 0.2, 0., 0.4, 0.4 # bird eye area in local floor plane frame
+    w = 640                     # bird eye image width (pixel coordinates)
+    s = dy/w                    # scale
+    h = int(dx/s)               # bird eye image height
+
     
 def plot_bird_eye_2D(be):
     ax = plt.gca()
@@ -103,10 +109,19 @@ def test_smocap():
     img_path = '/home/poine/work/smocap/smocap/test/ricou/floor_cam_z2.png'
     display_unwarped(be, cam, img_path)
 
+def test_trilopi():
+    intr_cam_calib_path = '/home/poine/work/robot_data/trilopi/camera1_intrinsics2.yaml'
+    extr_cam_calib_path = '/home/poine/work/robot_data/trilopi/camera1_extrinsics.yaml'
+    img_path = '/home/poine/work/robot_data/trilopi/extr_calib.png'
+    cam = cv_c.load_cam_from_files(intr_cam_calib_path, extr_cam_calib_path) 
+    be = cv_be.BirdEye(cam, BeParamTrilopi())
+    plot_bird_eye_2D(be)
+    plt.show()
     
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     LOG.info(" using opencv version: {}".format(cv2.__version__))
     #test_christine()
     #test_julie()
-    test_smocap()
+    #test_smocap()
+    test_trilopi()
