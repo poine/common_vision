@@ -44,6 +44,10 @@ class Camera:
         self.fp_n = self.world_to_cam_T[:3,2]                      # image of [0 0 1]_world in cam frame
         self.fp_d = -np.dot(self.fp_n , self.world_to_cam_T[:3,3]) #
 
+    def set_pose_T(self, world_to_camo_T):
+        world_2_camo_t, world_2_camo_q  = cvu.tq_of_T(world_to_camo_T)
+        self.set_location(world_2_camo_t, world_2_camo_q)
+        
     def set_encoding(self, encoding):
         self.img_encoding = encoding
             
