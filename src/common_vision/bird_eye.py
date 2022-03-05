@@ -7,22 +7,22 @@ import shapely, shapely.geometry
 import pdb
 
 '''
+ FIXME: tables seem to be missing, see BirdEyeTransformer in two_d_guidance/src/two_d_guidance/trr/vision/utils.py
+
 Bird Eye View.
 This object converts between camera image to the local floor plane (lfp). 
 It is able to transform the camera image into a bird eye view, as if the camera was looking straight at the floor plane.
 This transformed image is refered to as unwarped.
-For efficiency purposes, transformation tables are pre computed. As this computation is expensice, tables can be loaded from filesystem.
+For efficiency purposes, transformation tables are pre computed. As this computation is expensive, tables can be loaded from filesystem.
 '''
 
 LOG = logging.getLogger('bird_eye')
 
 def _make_line(p0, p1, spacing=1, endpoint=True):
     dist = np.linalg.norm(p1-p0)
-    n_pt = dist/spacing
+    n_pt = int(dist/spacing)
     if endpoint: n_pt += 1
     return np.stack([np.linspace(p0[j], p1[j], n_pt, endpoint=endpoint) for j in range(len(p0))], axis=-1)
-    #pdb.set_trace()
-    #return np.stack([np.arange(p0[j], p1[j], spacing) for j in range(len(p0))], axis=-1)
 
 def _lines_of_corners(corners, spacing):
     return np.concatenate([_make_line(corners[i-1], corners[i], spacing=spacing, endpoint=False) for i in range(len(corners))])
@@ -38,8 +38,8 @@ class BirdEye:
 
     def _set_param(self, cam, param):
         self.param = param
-        self.corners_lfp = np.array([(param.x0, param.dy/2, 0.), (param.x0+param.dx, param.dy/2, 0.),
-                                       (param.x0+ param.dx, -param.dy/2, 0.), (param.x0, -param.dy/2, 0.)])
+        self.corners_lfp = np.array([(param.x0, param.y0+param.dy/2, 0.), (param.x0+param.dx, param.y0+param.dy/2, 0.),
+                                       (param.x0+param.dx, param.y0-param.dy/2, 0.), (param.x0, param.y0-param.dy/2, 0.)])
         self._compute_cam_viewing_area(cam)
         self._compute_H_lfp(cam)
         self._compute_H_unwarped(cam)
@@ -47,7 +47,8 @@ class BirdEye:
 
     def _compute_cam_viewing_area(self, cam, max_dist=20):
         # Compute the contour of the intersection between camera frustum and floor plane (cliping to max_dist)
-        cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h], [0, 0]])
+        cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h]])#, [0, 0]])
+        #print(cam_va_corners_img)
         cam_va_borders_img = _lines_of_corners(cam_va_corners_img, spacing=1)
         cam_va_borders_undistorted = cam.undistort_points(cam_va_borders_img.reshape(-1, 1, 2))
         cam_va_borders_imp = np.array([np.dot(cam.inv_undist_K, [u, v, 1]) for (u, v) in cam_va_borders_undistorted.squeeze()])
@@ -91,13 +92,13 @@ class BirdEye:
 
         
         
-    # Convertions between lfp and unwarped     
+    # Conversions between lfp and unwarped     
     def lfp_to_unwarped(self, cam, cnt_lfp):
-        cnt_uv = np.array([(self.param.w/2-_y/self.param.s, self.param.h-(_x-self.param.x0)/self.param.s) for _x, _y, _ in cnt_lfp])
+        cnt_uv = np.array([(self.param.w/2-(_y-self.param.y0)/self.param.s, self.param.h-(_x-self.param.x0)/self.param.s) for _x, _y, _ in cnt_lfp])
         return cnt_uv
 
     def unwarped_to_fp(self, cam, cnt_uw):
-        self.cnt_fp = np.array([((self.param.h-p[1])*self.param.s+self.param.x0, (self.param.w/2-p[0])*self.s, 0.) for p in cnt_uw.squeeze()])
+        self.cnt_fp = np.array([((self.param.h-p[1])*self.param.s+self.param.x0, (self.param.w/2-p[0])*self.s+self.param.y0, 0.) for p in cnt_uw.squeeze()])
         return self.cnt_fp
 
     # undistort, then unwarp image
