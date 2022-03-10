@@ -30,6 +30,39 @@ def _lines_of_corners(corners, spacing):
 def get_points_on_plane(rays, plane_n, plane_d):
     return np.array([-plane_d/np.dot(ray, plane_n)*ray for ray in rays])
 
+class BirdEyeParam:
+    def __init__(self, x0=0.3, dx=3., dy=2., w=640):
+        # coordinates of viewing area on local floorplane in base_footprint frame
+        self.x0, self.dx, self.dy = x0, dx, dy
+        # coordinates of viewing area as a pixel array (unwarped)
+        self.w = w; self.s = self.dy/self.w; self.h = int(self.dx/self.s)
+
+        # viewing area in base_footprint frame
+        # bottom_right, top_right, top_left, bottom_left in base_footprint frame
+        self.corners_be_blf = np.array([(self.x0, self.dy/2, 0.), (self.x0+self.dx, self.dy/2, 0.), (self.x0+self.dx, -self.dy/2, 0.), (self.x0, -self.dy/2, 0.)])
+        self.corners_be_img = np.array([[0, self.h], [0, 0], [self.w, 0], [self.w, self.h]])
+
+class JulieBirdEyeParam(BirdEyeParam):
+    def __init__(self, x0=2.7, dx=15., dy=8., w=640):
+        BirdEyeParam.__init__(self, x0, dx, dy, w)
+        
+class BeParamTrilopi:
+    x0, y0, dx, dy = 0.11, 0., 0.25, 0.2 # bird eye area in local floor plane frame
+    w = 640                     # bird eye image width (pixel coordinates)
+    s = dy/w                    # scale
+    h = int(dx/s)               # bird eye image height
+
+
+        
+def NamedBirdEyeParam(_name):
+    if    _name == 'caroline':  return CarolineBirdEyeParam()
+    elif  _name == 'christine': return ChristineBirdEyeParam()
+    elif  _name == 'caroline_jetson':  return CarolineJetsonBirdEyeParam()
+    elif  _name == 'caroline_test_amcl':  return CarolineJetsonBirdEyeParam()
+    elif  _name == 'julie':  return JulieBirdEyeParam()
+    elif  _name == 'trilopi':  return BeParamTrilopi()
+    return None
+
 
 class BirdEye:
 
@@ -40,12 +73,18 @@ class BirdEye:
         self.param = param
         self.corners_lfp = np.array([(param.x0, param.y0+param.dy/2, 0.), (param.x0+param.dx, param.y0+param.dy/2, 0.),
                                        (param.x0+param.dx, param.y0-param.dy/2, 0.), (param.x0, param.y0-param.dy/2, 0.)])
-        self._compute_cam_viewing_area(cam)
-        self._compute_H_lfp(cam)
-        self._compute_H_unwarped(cam)
-        self._compute_image_mask(cam)
+        try:
+            self._compute_cam_viewing_area(cam)
+            self._compute_H_lfp(cam)
+            self._compute_H_unwarped(cam)
+            self._compute_image_mask(cam)
+        except shapely.errors.TopologicalError:
+            self.borders_isect_be_cam_lfp = np.zeros((1, 3))
+            print('miserable failure')
+        except IndexError:
+            print('miserable failure 2')
 
-    def _compute_cam_viewing_area(self, cam, max_dist=20):
+    def _compute_cam_viewing_area(self, cam, max_dist=0.5):
         # Compute the contour of the intersection between camera frustum and floor plane (cliping to max_dist)
         cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h]])#, [0, 0]])
         #print(cam_va_corners_img)

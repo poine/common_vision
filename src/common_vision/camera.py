@@ -93,6 +93,7 @@ class Camera:
     def load_extrinsics(self, filename):
         self.extrinsics_filename = filename
         ref_to_camo_t, ref_to_camo_q = load_extrinsics(filename)
+        #print(ref_to_camo_t, ref_to_camo_q)
         self.set_location(ref_to_camo_t, ref_to_camo_q)
         
         
@@ -129,7 +130,7 @@ class Camera:
 # I should use something from camera_calibration_parsers
 def load_intrinsics(filename, verbose=False):
     with open(filename) as f:
-        _dict = yaml.load(f)
+        _dict = yaml.load(f, Loader=yaml.FullLoader)
         camera_matrix = np.array(_dict.get('camera_matrix')['data']).reshape(3, 3)
         dist_coeffs = np.array(_dict['distortion_coefficients']['data'])
         w, h = _dict['image_width'], _dict['image_height']
@@ -191,7 +192,7 @@ def write_intrinsics2(filename, img_shape, cmtx, distk, a=1., cname='unknown'):
 
 def load_extrinsics(filename, verbose=False):
     with open(filename, 'r') as stream:
-        _data = yaml.load(stream)
+        _data = yaml.load(stream, Loader=yaml.FullLoader)
     ref_to_camo_t = np.fromstring(_data['ref_to_camo_t'], sep=',')
     ref_to_camo_q = np.fromstring(_data['ref_to_camo_q'], sep=',')
     return ref_to_camo_t, ref_to_camo_q

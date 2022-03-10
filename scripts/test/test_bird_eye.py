@@ -36,7 +36,7 @@ class BeParamSmocap:
     h = int(dx/s)                        # bird eye image height
 
 class BeParamTrilopi:
-    x0, y0, dx, dy = 0.2, 0., 0.4, 0.4 # bird eye area in local floor plane frame
+    x0, y0, dx, dy = 0.12, 0., 0.3, 0.2 # bird eye area in local floor plane frame
     w = 640                     # bird eye image width (pixel coordinates)
     s = dy/w                    # scale
     h = int(dx/s)               # bird eye image height
@@ -110,14 +110,16 @@ def test_smocap():
     display_unwarped(be, cam, img_path)
 
 def test_trilopi():
-    intr_cam_calib_path = '/home/poine/work/robot_data/trilopi/camera1_intrinsics2.yaml'
-    extr_cam_calib_path = '/home/poine/work/robot_data/trilopi/camera1_extrinsics.yaml'
-    img_path = '/home/poine/work/robot_data/trilopi/extr_calib.png'
+    intr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_intrinsics2.yaml'
+    extr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_extrinsics.yaml'
+    #img_path = '/home/ubuntu/work/robot_data/trilopi/extr_calib.png'
+    img_path = '/home/ubuntu/work/robot_data/trilopi/line_1.png'
     cam = cv_c.load_cam_from_files(intr_cam_calib_path, extr_cam_calib_path) 
     be = cv_be.BirdEye(cam, BeParamTrilopi())
     plot_bird_eye_2D(be)
     plt.show()
-    
+    display_unwarped(be, cam, img_path)
+        
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     LOG.info(" using opencv version: {}".format(cv2.__version__))

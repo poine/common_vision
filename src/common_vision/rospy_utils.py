@@ -1,7 +1,9 @@
 import numpy as np
-import rospy, tf2_ros, sensor_msgs.msg, cv_bridge, cv2
-import sensor_msgs.msg, geometry_msgs.msg, visualization_msgs.msg, tf
+import rospy, tf2_ros, sensor_msgs.msg
+import cv_bridge, cv2
+import sensor_msgs.msg, geometry_msgs.msg, visualization_msgs.msg #, tf
 
+import common_vision.msg
 import common_vision.camera as cv_cam
 import common_vision.utils as cv_u
 
@@ -35,6 +37,42 @@ def retrieve_cam(cam_name, _id=0, fetch_extrinsics=True, world='world'):
     cam.set_encoding(cam_img_msg.encoding)
     rospy.loginfo('   retrieved encoding ({})'.format(cam_img_msg.encoding))
     return cam
+
+
+#
+# Generic
+#
+   
+class NoRXMsgException(Exception): pass
+class RXMsgTimeoutException(Exception): pass
+
+class SimplePublisher(rospy.Publisher):
+    def __init__(self, topic, msg_class, what, qs=1):
+        rospy.loginfo(' {} publishing on {}'.format(what, topic))
+        rospy.Publisher.__init__(self, topic, msg_class, queue_size=qs)
+        self.msg_class = msg_class
+        
+class SimpleSubscriber:
+    def __init__(self, topic, msg_class, what, timeout=0.5, user_cbk=None):
+        self.sub = rospy.Subscriber(topic, msg_class, self.msg_callback, queue_size=1)
+        rospy.loginfo(' {} subscribed to {}'.format(what, topic))
+        self.timeout, self.user_cbk = timeout, user_cbk
+        self.msg = None
+        
+    def msg_callback(self, msg):
+        self.msg = msg
+        self.last_msg_time = rospy.get_rostime()
+        if self.user_cbk is not None: self.user_cbk(msg)
+
+    def get(self):
+        if self.msg is None:
+            raise NoRXMsgException
+        if (rospy.get_rostime()-self.last_msg_time).to_sec() > self.timeout:
+            raise RXMsgTimeoutException
+        return self.msg
+
+
+
 
 #
 # Images
@@ -164,7 +202,8 @@ class TransformPublisher:
         tf_msg.child_frame_id = f2
         tf_msg.header.stamp = t
         _r = tf_msg.transform.rotation
-        _r.x, _r.y, _r.z, _r.w = tf.transformations.quaternion_from_matrix(T_f1tof2)
+        
+        _r.x, _r.y, _r.z, _r.w = cv_u.quaternion_from_matrix(T_f1tof2)#tf.transformations.quaternion_from_matrix(T_f1tof2)
         _t = tf_msg.transform.translation
         _t.x, _t.y, _t.z = T_f1tof2[:3,3]
         if static:
@@ -206,6 +245,72 @@ class PoseArrayPublisher(MarkerArrayPublisher):
         MarkerArrayPublisher.__init__(self, topic,  ["package://ros_pat/media/{}".format(dae)], scales=scales, frame_id=frame_id)
 
 
+
+#
+#
+#
+class TwistSubscriber(SimpleSubscriber):
+    def __init__(self, topic='cmd_vel', what='unkown', timeout=0.1, user_callback=None):
+        SimpleSubscriber.__init__(self, topic, geometry_msgs.msg.Twist, what, timeout, user_callback)
+
+    def get(self):
+        msg = SimpleSubscriber.get(self)
+        return msg.linear.x, msg.angular.z 
+
+
+        
+#
+# Lanes
+# 
+class LaneModelPublisher(SimplePublisher):
+    def __init__(self, topic, who='N/A'):
+        SimplePublisher.__init__(self, topic, common_vision.msg.LaneModel, who)
+
+    def publish(self, lm):
+        msg = common_vision.msg.LaneModel()
+        msg.header.stamp = lm.stamp
+        msg.poly = lm.coefs
+        SimplePublisher.publish(self, msg)
+
+        
+class LaneModelSubscriber(SimpleSubscriber):
+    def __init__(self, topic, what='', timeout=0.1, user_cbk=None):
+        SimpleSubscriber.__init__(self, topic, common_vision.msg.LaneModel, what, timeout, user_cbk)
+
+    def get(self, lm):
+        msg = SimpleSubscriber.get(self) # raise exceptions
+        lm.coefs = self.msg.poly
+        lm.stamp = self.msg.header.stamp
+        lm.set_valid(True)
+
+#
+# Guidance Status
+#
+import two_d_guidance.msg # cleary not!!!!
+class GuidanceStatusPublisher(SimplePublisher):
+    def __init__(self, topic='guidance/status', what='N/A', timeout=0.1, user_callback=None):
+        SimplePublisher.__init__(self, topic, two_d_guidance.msg.FLGuidanceStatus, what) # FIXME trr.msg.GuidanceStatus
+
+    def publish(self, model):
+        msg = two_d_guidance.msg.FLGuidanceStatus()
+        msg.guidance_mode = model.mode
+        msg.poly = model.lane.coefs
+        msg.lookahead_dist = model.lookahead_dist
+        msg.lookahead_time = model.lookahead_time
+        msg.carrot_x, msg.carrot_y = model.carrot
+        msg.R = model.R
+        msg.lin_sp, msg.ang_sp = model.lin_sp, model.ang_sp
+        SimplePublisher.publish(self, msg)
+
+class GuidanceStatusSubscriber(SimpleSubscriber):
+    def __init__(self, topic='trr_guidance/status', what='N/A', timeout=0.1, user_callback=None):
+        SimpleSubscriber.__init__(self, topic, two_d_guidance.msg.FLGuidanceStatus, what, timeout, user_callback)
+        
+    # def get(self):
+    #     msg = SimpleSubscriber.get(self) # raise exceptions
+    #     return msg
+
+        
 #
 # Algebra/Transforms, stolen from pat3
 #
@@ -297,7 +402,8 @@ class SimpleVisionPipeNode:
         self.cam_lst.unregister()
         
     # we get a bgr8 image as input
-    def on_image(self, img_bgr, (stamp, seq)):
+    def on_image(self, img_bgr, arg):
+        stamp, seq = arg
         self.pipeline.process_image(img_bgr, self.cam, stamp, seq)
         if self.pipe_cbk is not None: self.pipe_cbk()
         

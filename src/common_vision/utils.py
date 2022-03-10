@@ -328,3 +328,319 @@ def imshow_mosaic(imgs, txt, size=640, ncol=2):
         blank_image[ir*miw:(ir+1)*miw, ic*mih:(ic+1)*mih] = _im
     
     cv2.imshow(txt, blank_image)
+
+# fit an image to a new canvas (changes the size)
+def change_canvas(img_in, out_h, out_w, border_color=128):
+    img_out = np.full((out_h, out_w, 3), border_color, dtype=np.uint8)
+    in_h, in_w, _ = img_in.shape
+    scale = min(float(out_h)/in_h, float(out_w)/in_w)
+    h, w = int(scale*in_h), int(scale*in_w)
+    dx, dy = (out_w-w)/2, (out_h-h)/2
+    img_out[dy:dy+h, dx:dx+w] = cv2.resize(img_in, (w, h))
+    return img_out
+
+#
+# bringing code back from twod_guidance :(
+#
+
+#
+#  originated from twod_guidance.trr.utils
+#
+
+# Computes the bridge filtering. This code is speed optimized. Original code using filter2D is much slower (but much easier to understand):
+# KEEP        cell = np.ones((cell_height, cell_width), np.uint8)
+# KEEP        kernel = np.concatenate((cell * -0.5, cell, cell * -0.5), axis = 1) / (cell_height * cell_width)
+# KEEP        return cv2.filter2D(mini_img, -1, kernel)
+def bridge_filter(img, cell_width, cell_height):
+    smooth = cv2.boxFilter(img, cv2.CV_16S, (cell_width, cell_height))
+    half = smooth / 2
+    smooth[:, cell_width:-cell_width] -= half[:, 0:-2*cell_width] + half[:, 2*cell_width:]
+    # This code avoids to build half and divide by 2, but implies complex rewrite for the last part: cv2.scaleAdd(smooth[:, 0:-2*cell_width] + smooth[:, 2*cell_width:], -0.5, smooth[:, cell_width:-cell_width], smooth[:, cell_width:-cell_width])
+    smooth[:, 0:cell_width] -= half[:, cell_width:2*cell_width]
+    smooth[:, -cell_width:] -= half[:, -2*cell_width:-cell_width]
+    for c in range(cell_width):
+        smooth[:, c] -= half[:, 0]
+        smooth[:, -c-1] -= half[:, -1]
+    smooth[smooth < 0] = 0
+    return np.uint8(smooth)
+
+class BinaryThresholder:
+    def __init__(self, thresh=200, offset=15):
+        self.thresh_val = thresh
+        self.offset_val = -offset
+        self.threshold = None
+            
+    def set_offset(self, offset):
+        self.offset_val = -offset
+
+    def set_threshold(self, thresh): self.thresh_val = thresh
+
+    def process_bgr_noflt(self, bgr_img, birdeye_mode=True):
+        gray_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray_img, (9, 9), 0)
+        ret, self.threshold = cv2.threshold(blurred, self.thresh_val, 255, cv2.THRESH_BINARY)
+        return self.threshold
+
+    def process_gray_noflt(self, gray_img):
+        blurred = cv2.GaussianBlur(gray_img, (9, 9), 0)
+        ret, self.threshold = cv2.threshold(blurred, self.thresh_val, 255, cv2.THRESH_BINARY)
+        return self.threshold
+        
+    def process_bgr(self, img, birdeye_mode=True):
+        blue_img = img[:, :, 0]
+        if birdeye_mode:
+            width = 20
+            bridge_img = bridge_filter(blue_img, width, width)
+            # Level -10 for inside, -15 for outside
+            self.threshold = cv2.adaptiveThreshold(bridge_img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 351, self.offset_val)
+        else:
+            res = []
+            # Calibration for christine
+            for step in ((0, 35, 8), (35, 70, 13), (70, 120, 22), (120, 200, 35), (200, 300, 50), (300, None, 70)):
+                width = step[2]
+                h = min(width, 50)
+                mini_img = blue_img[step[0]:step[1], :]
+                bridge_img = bridge_filter(mini_img, width, h)
+                # Level -10 for inside, -15 for outside
+                bridge_th_img = cv2.adaptiveThreshold(bridge_img, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 351, self.offset_val)
+                res.append(bridge_th_img)
+            self.threshold = cv2.vconcat(res)
+            
+        return self.threshold    
+
+
+class ContourFinder:
+    def __init__(self, min_area=None, single_contour=False):
+        self.min_area = min_area
+        self.single_contour = single_contour
+        self.img = None
+        self.cnts = None
+        self.cnt_max = None
+        self.cnt_max_area = 0
+        self.valid_cnts = np.array([])
+
+    def has_contour(self): return (self.cnt_max is not None)
+    def get_contour(self): return self.cnt_max
+    def get_contour_area(self): return self.cnt_max_area
+    
+    def process(self, img):
+        # detect contours
+        self.cnts, hierarchy = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
+        # TODO: remove cnt_max computing
+        # TODO: remove single_contour code
+        self.cnt_max = None
+        if self.cnts is not None and len(self.cnts) > 0:
+            # This reduce global computing time but may impact polyfit
+            #self.cnts = [cv2.approxPolyDP(c, 0.8, True) for c in self.cnts]
+            # find contour with largest area
+            self.cnt_max = max(self.cnts, key=cv2.contourArea)
+            self.cnt_max_area = cv2.contourArea(self.cnt_max)
+            if self.min_area is not None and self.cnt_max_area < self.min_area:
+                self.cnt_max, self.cnt_max_area = None, 0
+
+            # find all contours with a sufficient area
+            if not self.single_contour:
+                self.cnt_areas = np.array([cv2.contourArea(c) for c in self.cnts])
+                self.valid_cnts_idx = self.cnt_areas > self.min_area
+                self.valid_cnts = np.array(self.cnts)[self.valid_cnts_idx]
+               
+    def draw(self, img, mc_border_color=(255,0,0), thickness=3, fill=True, mc_fill_color=(255,0,0), draw_all=False,
+             ac_fill_color=(0, 128, 128)):
+        if self.cnt_max is not None:
+            if fill:
+                try:
+                    cv2.fillPoly(img, pts =[self.cnt_max], color=mc_fill_color)
+                except cv2.error: # fails when poly is too small?
+                    #print self.cnt_max.shape
+                    pass
+            cv2.drawContours(img, self.cnt_max, -1, mc_border_color, thickness)
+
+    def draw2(self, img, cnts, cnts_mask, fill_color1=(0, 128, 0), fill_color2=(0, 0, 128)):
+        for c, inlier in zip(cnts, cnts_mask):
+            cv2.drawContours(img, c, -1, (255, 0, 0), 2)
+            cv2.fillPoly(img, pts =[c], color=fill_color1 if inlier else fill_color2)
+            
+
+
+            
+def get_points_on_plane(rays, plane_n, plane_d):
+    return np.array([-plane_d/np.dot(ray, plane_n)*ray for ray in rays])
+
+class FloorPlaneInjector:
+    def __init__(self):
+        self.contour_floor_plane_blf = None
+
+    def compute(self, contour_img, cam):
+        # undistorted coordinates
+        #contour_undistorted = cv2.undistortPoints(contour_img.astype(np.float32), cam.K, cam.D, None, cam.undist_K)
+        contour_undistorted = cam.undistort_points(contour_img.astype(np.float32))
+        # contour in optical plan
+        contour_camo = [np.dot(cam.inv_undist_K, [u, v, 1]) for (u, v) in contour_undistorted.squeeze()]
+        # contour projected on floor plane (in camo frame)
+        contour_floor_plane_camo = get_points_on_plane(contour_camo, cam.fp_n, cam.fp_d)
+        # contour projected on floor plane (in body frame)
+        self.contour_floor_plane_blf = np.array([np.dot(cam.cam_to_world_T[:3], p.tolist()+[1]) for p in contour_floor_plane_camo])
+
+        return self.contour_floor_plane_blf
+
+
+
+
+#
+#  originated from twod_guidance.trr.utils
+#
+
+
+#
+# Velocity profile
+#
+# Same values as used in guidance
+def filter(vel_sps, dists, omega=6., xi=0.9):
+    # second order reference model driven by input setpoint
+    _sats = [4., 25.]  # accel, jerk
+    ref = tdg.utils.SecOrdLinRef(omega=omega, xi=xi, sats=_sats)
+    out = np.zeros((len(vel_sps), 3))
+    # run ref
+    out[0, 0] = vel_sps[0]; ref.reset(out[0])
+    for i in range(1,len(vel_sps)):
+        dt = (dists[i] - dists[i - 1]) / out[i - 1, 0]
+        out[i] = ref.run(dt, vel_sps[i])
+    return out
+
+
+import matplotlib.pyplot as plt
+class LaneModel:
+    # center line as polynomial
+    # y = an.x^n + ...
+    def __init__(self):
+        self.order = 3
+        self.coefs = [0., 0., 0., 0.01, 0.05]
+        self.stamp = None
+        self.valid = False
+        self.inliers_mask = []
+
+    def is_valid(self): return self.valid # FIXME remove that
+    def set_valid(self, v): self.valid = v 
+
+    def set_invalid(self):
+        self.valid = False
+        self.coefs = np.full(self.order+1, np.nan)
+  
+    def get_y(self, x):
+        return np.polyval(self.coefs, x)
+
+    def fit_single_contour(self, ctr, order=3):
+        xs, ys = ctr[:,0],ctr[:,1]
+        self.coefs, _res, rank, _singular, _rcond = np.polyfit(xs, ys, order, full=True)
+        self.x_min, self.x_max = np.min(xs), np.max(xs)
+        #pdb.set_trace()
+    
+    def fit_all_contours(self, ctrs, order=3):
+        xs, ys, weights = [], [], []
+        for c in ctrs:
+            area = cv2.contourArea(c)
+            xs = np.append(xs, c[:, 0, 0])
+            ys = np.append(ys, c[:, 0, 1])
+            weights = np.append(weights, [area / len(c)] * len(c))
+
+        self.coefs, _res, rank, _singular, _rcond = np.polyfit(xs, ys, order, full=True, w=weights)
+        if rank <= order:
+            reduced_order = min(1, rank - 2)
+            self.coefs = np.polyfit(xs, ys, reduced_order, w=weights)
+            self.coefs = np.append([0] * (order - reduced_order), self.coefs)
+        self.x_min, self.x_max = np.min(xs), np.max(xs)
+
+    def fit(self, ctrs, order=3, right_border=0.9, left_border=-0.9, lateral_margin=0.25):
+        """ 
+        Input: ctrs are contours with points coordinates in meters.
+        ctrs[index][:, 0, 0=front dist/1=lateral offset]
+        Origin is robot center
+        """
+        self.inliers_mask = np.full(len(ctrs), True)
+        if len(ctrs) < 2:
+            self.fit_all_contours(ctrs, order)
+        else:
+            all_min = [min(c[:, 0, 0]) for c in ctrs]
+            all_max = [max(c[:, 0, 0]) for c in ctrs]
+            # low ref at 1/4 of the contour, high ref at 3/4 of the contour
+            low_ref_point = np.multiply(np.add(np.multiply(all_min, 3), all_max), 0.25)
+            high_ref_point = np.multiply(np.add(all_min, np.multiply(all_max, 3)), 0.25)
+
+            # priority is defined by (max - min) / min = max/min - 1, but -1 constant is simplified
+            # offset to increase priority of near contours
+            offset = min(all_min) / 2
+            all_priorities = np.divide(np.add(all_max, -offset), np.add(all_min, -offset))
+            
+            remaining = len(ctrs)
+            selected = [ ]
+            while True:
+                best_id = np.argmax(all_priorities)
+                candidate = ctrs[best_id]
+                this_min = all_min[best_id]
+                this_max = all_max[best_id]
+                all_priorities[best_id] = -1
+                remaining -= 1
+
+                # New contour has to match with building curve
+                if len(selected) > 0:
+                    self.fit_all_contours(selected, order)
+                    y1 = np.polyval(self.coefs, this_min)
+                    y2 = np.polyval(self.coefs, this_max)
+                    index1 = np.argmin(candidate[:, 0, 0])
+                    d1 = candidate[index1, 0, 1] - y1
+                    index2 = np.argmax(candidate[:, 0, 0])
+                    d2 = candidate[index2, 0, 1] - y2
+                    if min(abs(d1), abs(d2)) > lateral_margin:
+                        self.inliers_mask[best_id] = False
+                        if remaining == 0:
+                            break
+                        else:
+                            continue
+                        
+                selected.append(candidate)
+
+                # If the new contour reaches a border, then stop
+                if max(candidate[:, 0, 1]) > right_border or min(candidate[:, 0, 1]) < left_border :
+                    for i in range(len(all_priorities)):
+                        if all_priorities[i] > 0:
+                            self.inliers_mask[i] = False
+                    break
+
+                # Invalidate overlapping contours
+                for i in range(len(all_priorities)):
+                    if all_priorities[i] > 0:
+                        if low_ref_point[i] < this_max and high_ref_point[i] > this_min :
+                            all_priorities[i] = -1
+                            self.inliers_mask[i] = False
+                            remaining -= 1
+                            
+                if remaining == 0:
+                    break
+
+            self.fit_all_contours(selected, order)
+
+    def _plot(self, ctrs):
+        for c in ctrs:
+            plt.plot(c[:,0,0], c[:,0,1])
+        xs = np.linspace(self.x_min, self.x_max)
+        plt.plot(xs, np.polyval(self.coefs,xs))
+        #pdb.set_trace()
+        #plt.gca().axis('equal')
+        plt.gca().set_aspect('equal', 'box')
+        plt.show()
+
+            
+            
+    def draw_on_cam_img(self, img, cam, l0=0.1, l1=0.7, color=(0,128,0)):
+        xs = np.linspace(l0, l1, 20); ys = self.get_y(xs)
+        pts_world = np.array([[x, y, 0] for x, y in zip(xs, ys)])
+        pts_img = cam.project(pts_world)
+        for i in range(len(pts_img)-1):
+            try:
+                cv2.line(img, tuple(pts_img[i].squeeze().astype(int)), tuple(pts_img[i+1].squeeze().astype(int)), color, 4)
+            except OverflowError:
+                pass
+
+
+
+    
