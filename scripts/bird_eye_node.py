@@ -11,13 +11,6 @@ import common_vision.rospy_utils as cv_rpu
 import common_vision.utils as cv_u
 import common_vision.bird_eye as cv_be
 
-class BeParamTrilopi:
-    x0, y0, dx, dy = 0.11, 0., 0.25, 0.2 # bird eye area in local floor plane frame
-    w = 640                     # bird eye image width (pixel coordinates)
-    s = dy/w                    # scale
-    h = int(dx/s)               # bird eye image height
-
-    
 class BirdEyePipeline(cv_u.Pipeline):
     show_none=0
     def __init__(self, cam, robot_name):
@@ -25,14 +18,14 @@ class BirdEyePipeline(cv_u.Pipeline):
         #print(f'ros extrinsics\n{cam.world_to_cam_T}')
         print(f'ros world_to_cam\n{cam.world_to_cam_t} {cam.world_to_cam_q}')
         #be_param = cv_be.BirdEye(cam, BeParam())#trr_vu.NamedBirdEyeParam(robot_name)
-        intr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_intrinsics2.yaml'
+        #intr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_intrinsics2.yaml'
         #extr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_extrinsics.yaml'
         extr_cam_calib_path = '/tmp/extcalib.yaml'
         ##cam.load_all({'intrinsics': intr_cam_calib_path, 'extrinsics)
         #cam.load_intrinsics(intr_cam_calib_path)
         cam.load_extrinsics(extr_cam_calib_path)
         print(f'loaded world_to_cam\n{cam.world_to_cam_t} {cam.world_to_cam_q}')
-        self.bird_eye = cv_be.BirdEye(cam, BeParamTrilopi())
+        self.bird_eye = cv_be.BirdEye(cam, cv_be.BeParamTrilopi(), cache_filename='/tmp/be_cfg.npz', force_recompute=False)
         self.display_mode = 2
         self.img = None
 
@@ -46,9 +39,16 @@ class BirdEyePipeline(cv_u.Pipeline):
         if self.img is None:
             return np.zeros((cam.h, cam.w, 3), dtype=np.uint8)
         else:
-            if self.display_mode == 1:
+            if self.display_mode == 1: # input
                 debug_img = self.img.copy()
                 #debug_img = cv2.cvtColor(self.gray, cv2.COLOR_GRAY2BGR)
+                cv2.drawContours(debug_img, self.bird_eye.cam_img_mask, -1, (0,255,255), 2)
+                
+            elif self.display_mode == 2: 
+                debug_img = self.img_unwarped
+                u = cv_be.UnwarpedImage()
+                u.draw_grid(debug_img, self.bird_eye, cam)
+                u.draw_cam_va(debug_img, self.bird_eye, cam)
             else:
                 debug_img = self.img_unwarped
             #cv2.rectangle(debug_img, tuple(self.tl), tuple(self.br), color=(0, 0, 255), thickness=3)
@@ -59,9 +59,10 @@ class BirdEyePipeline(cv_u.Pipeline):
 
 class Node(cv_rpu.SimpleVisionPipeNode):
 
-    def __init__(self):
+    def __init__(self, compress_debug=True):
        cv_rpu.SimpleVisionPipeNode.__init__(self, BirdEyePipeline, self.pipe_cbk, img_fmt="passthrough", fetch_extrinsics=True)
-       self.img_pub = cv_rpu.ImgPublisher(self.cam, 'vision/bird_eye')
+       if compress_debug: self.img_pub = cv_rpu.CompressedImgPublisher(self.cam, '/vision/bird_eye/image')
+       else: self.img_pub = cv_rpu.ImgPublisher(self.cam, '/vision/bird_eye/image')
        self.cfg_srv = dynamic_reconfigure.server.Server(common_vision.cfg.bird_eye_nodeConfig, self.cfg_callback)
        self.start()
 

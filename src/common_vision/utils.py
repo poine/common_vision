@@ -515,9 +515,11 @@ class LaneModel:
     def __init__(self):
         self.order = 3
         self.coefs = [0., 0., 0., 0.01, 0.05]
+        self.x_min, self.x_max = 0.1, 0.2 
         self.stamp = None
         self.valid = False
         self.inliers_mask = []
+        
 
     def is_valid(self): return self.valid # FIXME remove that
     def set_valid(self, v): self.valid = v 

@@ -11,17 +11,18 @@ import pdb
 # TODO: use multiple contours rather than larger one?
 class Contour1Pipeline(cv_u.Pipeline):
     show_none, show_input, show_thresh, show_contour, show_be = range(5)
-    def __init__(self, cam, robot_name):
+    def __init__(self, cam, robot_name, cache_filename=None, force_recompute=False):
         cv_u.Pipeline.__init__(self)
         #FIXME
         extr_cam_calib_path = '/home/ubuntu/work/robot_data/trilopi/camera1_extrinsics.yaml'
         cam.load_extrinsics(extr_cam_calib_path)
         
-        self.thresholder = cv_u.BinaryThresholder(thresh=180)
+        #self.thresholder = cv_u.BinaryThresholder(thresh=180)# trr
+        self.thresholder = cv_u.BinaryThresholder(thresh=190) # for roboteck
         self.contour_finder = cv_u.ContourFinder(min_area=500)
         self.floor_plane_injector = cv_u.FloorPlaneInjector()
         be_param = cv_be.NamedBirdEyeParam(robot_name)
-        self.bird_eye = cv_be.BirdEye(cam,  be_param)
+        self.bird_eye = cv_be.BirdEye(cam,  be_param, cache_filename, force_recompute)
         self.lane_model = cv_u.LaneModel()
         self.display_mode = Contour1Pipeline.show_contour
         self.img = None
@@ -38,7 +39,9 @@ class Contour1Pipeline(cv_u.Pipeline):
         #                         [0.20,  0.165, 0]])
         # region of interest in lfp(local floor plan, front, left, up) frame
         #x0, dx, dy, dy2 = 0.14, 0.5, 0.08, 0.25
-        x0, dx, dy, dy2 = 0.105, 0.3, 0.05, 0.2
+        #x0, dx, dy, dy2 = 0.105, 0.3, 0.05, 0.2
+        #x0, dx, dy, dy2 = 0.105, 0.2, 0.05, 0.15
+        x0, dx, dy, dy2 = 0.095, 0.2, 0.04, 0.125
         contour_lfp = np.array([[x0, -dy, 0],
                                 [x0+dx, -dy2 , 0],
                                 [1.2*np.linalg.norm([x0+dx, dy2]), 0, 0],
@@ -57,7 +60,7 @@ class Contour1Pipeline(cv_u.Pipeline):
     def _process_image(self, img, cam, stamp):
         self.img = img
         self.img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        self.img_gray = (255-self.img_gray)
+        self.img_gray = (255-self.img_gray) # invert, for detecting black lines
         self.img_masked = cv2.bitwise_and(self.img_gray, self.img_gray, mask=self.mask.mask) 
         self.thresholder.process_gray_noflt(self.img_masked)
         self.contour_finder.process(self.thresholder.threshold)
@@ -69,6 +72,7 @@ class Contour1Pipeline(cv_u.Pipeline):
             #print('x in [{:.2f} {:.2f}] y in [{:.2f} {:.2f}]'.format(x_min, x_max, y_min, y_max))
             #print self.cnt_max_blf
             self.lane_model.fit_single_contour(self.cnt_max_blf)
+            #print(self.lane_model.x_min, self.lane_model.x_max)
             self.lane_model.set_valid(True)
             self.lane_model.stamp = stamp
             #self.lane_model.set_valid(False)
@@ -109,14 +113,16 @@ class Contour1Pipeline(cv_u.Pipeline):
 
 
     def draw_cam_scene(self, img, cam):
-        pts_lfp = np.array([[0, 0, 0], [0.05, 0, 0], [0, 0.05, 0], [0, 0, 0.05]]) + [0.15, 0, 0]
+        orig = [0.15, 0, 0]
+        pts_lfp = np.array([[0, 0, 0], [0.05, 0, 0], [0, 0.05, 0], [0, 0, 0.05]]) + orig
         pts_img = cam.project(pts_lfp)
         ps = [tuple(pts_img[_i,0].astype(int)) for _i in range(len(pts_img))]
         cv2.line(img, ps[0], ps[1], (0,0,255), 2)
         cv2.line(img, ps[0], ps[2], (0,255,0), 2)
         cv2.line(img, ps[0], ps[3], (255,0,0), 2)
         cv2.polylines(img, [self.mask.contour_img] , isClosed=True, color=(0, 255, 255), thickness=2)
-
+        f, h, c, w = cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 0, 0), 2
+        cv2.putText(img, f'{orig}', ps[0], f, h, c, w)
     
     def draw_be_scene(self, cam):
         return np.zeros((cam.h, cam.w, 3), dtype=np.uint8)

@@ -89,8 +89,9 @@ class NonePipeline(cv_u.Pipeline):
             # where you placed the chessboard wrt the robot
             #self.ref_2_board_t = [0.14, 0.51, -0.005] # ref (base link footprint) to ar board transform
             #self.ref_2_board_R = [[0, -1, 0],[-1, 0, 0],[0, 0, 1]]
-            self.ref_2_board_t = [0.430, 0.1, -0.005] # ref (base link footprint) to ar board transform
+            self.ref_2_board_t = [0.320, 0.1, -0.005] # ref (base link footprint) to ar board transform
             self.ref_2_board_R = [[-1, 0, 0],[0, -1, 0],[0, 0, 1]]
+            #self.ref_2_board_R = [[0, 1, 0],[-1, 0, 0],[0, 0, 1]]
             #print(np.linalg.det(self.ref_2_board_R))
             pt_ref = self.ref_2_board_t + np.array([[0,-0.1,0.01], [-0.08, -0.1, 0.01], [-0.16, -0.1, 0.01], [-0.24, -0.1, 0.01],
                                [-0.16, -0.1, 0.01], [-0.16, -0.1, 0.01], [-0.24, -0.14, 0.01]], dtype=float)

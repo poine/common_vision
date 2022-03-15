@@ -270,6 +270,8 @@ class LaneModelPublisher(SimplePublisher):
         msg = common_vision.msg.LaneModel()
         msg.header.stamp = lm.stamp
         msg.poly = lm.coefs
+        msg.x_min = lm.x_min
+        msg.x_max = lm.x_max
         SimplePublisher.publish(self, msg)
 
         
@@ -280,6 +282,8 @@ class LaneModelSubscriber(SimpleSubscriber):
     def get(self, lm):
         msg = SimpleSubscriber.get(self) # raise exceptions
         lm.coefs = self.msg.poly
+        lm.x_min = self.msg.x_min
+        lm.x_max = self.msg.x_max
         lm.stamp = self.msg.header.stamp
         lm.set_valid(True)
 
@@ -295,6 +299,8 @@ class GuidanceStatusPublisher(SimplePublisher):
         msg = two_d_guidance.msg.FLGuidanceStatus()
         msg.guidance_mode = model.mode
         msg.poly = model.lane.coefs
+        msg.x_min = model.lane.x_min
+        msg.x_max = model.lane.x_max
         msg.lookahead_dist = model.lookahead_dist
         msg.lookahead_time = model.lookahead_time
         msg.carrot_x, msg.carrot_y = model.carrot
@@ -361,8 +367,9 @@ def transform(a_to_b_T, p_a):
 
             
 ####
-## Nodes
+## Skeletons for common nodes
 
+# Node with a periodic callback
 class PeriodicNode:
 
     def __init__(self, name):
@@ -377,9 +384,9 @@ class PeriodicNode:
         except rospy.exceptions.ROSInterruptException:
             pass
 
-    
+# This node will fetch a camera, instantiate a pipeline, passing it the fetched camera    
 class SimpleVisionPipeNode:
-    def __init__(self, pipeline_class, pipe_cbk=None, img_fmt="passthrough", fetch_extrinsics=True):
+    def __init__(self, pipeline_class, pipe_cbk=None, pipe_args=None, img_fmt="passthrough", fetch_extrinsics=True):
         robot_name = rospy.get_param('~robot_name', '')
         def prefix(robot_name, what): return what if robot_name == '' else '{}/{}'.format(robot_name, what)
         self.cam_name = rospy.get_param('~camera', prefix(robot_name, 'camera_road_front'))
@@ -389,7 +396,10 @@ class SimpleVisionPipeNode:
         self.cam.set_undistortion_param(alpha=1.)
 
         self.cam_lst = CameraListener(self.cam_name, self.on_image, img_fmt)
-        self.pipeline = pipeline_class(self.cam, robot_name)
+        if pipe_args is not None:
+            self.pipeline = pipeline_class(self.cam, robot_name, **pipe_args)
+        else:
+            self.pipeline = pipeline_class(self.cam, robot_name)
 
 
         

@@ -13,7 +13,8 @@ Bird Eye View.
 This object converts between camera image to the local floor plane (lfp). 
 It is able to transform the camera image into a bird eye view, as if the camera was looking straight at the floor plane.
 This transformed image is refered to as unwarped.
-For efficiency purposes, transformation tables are pre computed. As this computation is expensive, tables can be loaded from filesystem.
+For efficiency purposes, transformation tables can be pre computed.
+As this computation is expensive, tables can be loaded from filesystem.
 '''
 
 LOG = logging.getLogger('bird_eye')
@@ -47,7 +48,8 @@ class JulieBirdEyeParam(BirdEyeParam):
         BirdEyeParam.__init__(self, x0, dx, dy, w)
         
 class BeParamTrilopi:
-    x0, y0, dx, dy = 0.11, 0., 0.25, 0.2 # bird eye area in local floor plane frame
+    #x0, y0, dx, dy = 0.11, 0., 0.25, 0.2 # bird eye area in local floor plane frame
+    x0, y0, dx, dy = 0.10, 0., 0.15, 0.2 # bird eye area in local floor plane frame
     w = 640                     # bird eye image width (pixel coordinates)
     s = dy/w                    # scale
     h = int(dx/s)               # bird eye image height
@@ -66,28 +68,53 @@ def NamedBirdEyeParam(_name):
 
 class BirdEye:
 
-    def __init__(self, cam, param):
-        self._set_param(cam, param)
+    def __init__(self, cam, param, cache_filename=None, force_recompute=False):
+        self._set_param(cam, param, cache_filename, force_recompute)
 
-    def _set_param(self, cam, param):
+    def _set_param(self, cam, param, cache_filename=None, force_recompute=False):
         self.param = param
         self.corners_lfp = np.array([(param.x0, param.y0+param.dy/2, 0.), (param.x0+param.dx, param.y0+param.dy/2, 0.),
                                        (param.x0+param.dx, param.y0-param.dy/2, 0.), (param.x0, param.y0-param.dy/2, 0.)])
-        try:
-            self._compute_cam_viewing_area(cam)
-            self._compute_H_lfp(cam)
-            self._compute_H_unwarped(cam)
-            self._compute_image_mask(cam)
-        except shapely.errors.TopologicalError:
-            self.borders_isect_be_cam_lfp = np.zeros((1, 3))
-            print('miserable failure')
-        except IndexError:
-            print('miserable failure 2')
+        print(f'cache_filename {cache_filename}')
+        if cache_filename is None or not os.path.exists(cache_filename) or force_recompute:
+            try:
+                self._compute_cam_viewing_area(cam)
+                self._compute_H_lfp(cam)
+                self._compute_H_unwarped(cam)
+                self._compute_H_unwarped_map(cam)
+                self._compute_undist_unwarp_map(cam)
+                self._compute_image_mask(cam) # FIXME
+            except shapely.errors.TopologicalError:
+                self.borders_isect_be_cam_lfp = np.zeros((1, 3))
+                print('miserable failure')
+            except IndexError:
+                print('miserable failure 2')
+            else:
+                if cache_filename is not None:
+                    print(f'saving tables to {cache_filename}')
+                    np.savez(cache_filename, H_lfp=self.H_lfp, unwarp_xmap=self.unwarp_xmap, unwarp_ymap=self.unwarp_ymap,
+                             undist_unwarp_xmap=self.undist_unwarp_xmap_int,  undist_unwarp_ymap=self.undist_unwarp_ymap_int,
+                             borders_isect_be_cam_lfp=self.borders_isect_be_cam_lfp,
+                             unwarped_img_mask=self.unwarped_img_mask,
+                             cam_img_mask=self.cam_img_mask)
 
-    def _compute_cam_viewing_area(self, cam, max_dist=0.5):
-        # Compute the contour of the intersection between camera frustum and floor plane (cliping to max_dist)
+
+        else:
+            data =  np.load(cache_filename)
+            print(f'loading precomputed data in {cache_filename}')
+            self.H_lfp = data['H_lfp']
+            self.unwarp_xmap = data['unwarp_xmap']
+            self.unwarp_ymap = data['unwarp_ymap']
+            self.undist_unwarp_xmap_int = data['undist_unwarp_xmap']
+            self.undist_unwarp_ymap_int = data['undist_unwarp_ymap']
+            self.borders_isect_be_cam_lfp = data['borders_isect_be_cam_lfp']
+            self.unwarped_img_mask = data['unwarped_img_mask']
+            self.cam_img_mask = data['cam_img_mask']
+        self._compute_image_mask(cam)
+            
+    def _compute_cam_viewing_area(self, cam, max_dist=0.3):
+        # Compute the contour of the intersection between camera's frustum and floor plane (cliping to max_dist)
         cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h]])#, [0, 0]])
-        #print(cam_va_corners_img)
         cam_va_borders_img = _lines_of_corners(cam_va_corners_img, spacing=1)
         cam_va_borders_undistorted = cam.undistort_points(cam_va_borders_img.reshape(-1, 1, 2))
         cam_va_borders_imp = np.array([np.dot(cam.inv_undist_K, [u, v, 1]) for (u, v) in cam_va_borders_undistorted.squeeze()])
@@ -118,7 +145,35 @@ class BirdEye:
         self.H_unwarped, status = cv2.findHomography(srcPoints=va_corners_imp, dstPoints=va_corners_unwarped, method=cv2.RANSAC, ransacReprojThreshold=0.01)
         print('computed H unwarped: ({}/{} inliers)\n{}'.format( np.count_nonzero(status), len(va_corners_imp), self.H_unwarped))
 
-    # Compute a mask representing the bird eye area, viewed on the camera image
+    # Compute homography from undistorted image plane to unwarped as a map, to speed up computation
+    def _compute_H_unwarped_map(self, cam):
+        print('computing unwarp maps')
+        self.unwarp_xmap = np.zeros((self.param.h, self.param.w), np.float32)
+        self.unwarp_ymap = np.zeros((self.param.h, self.param.w), np.float32)
+        Hinv = np.linalg.inv(self.H_unwarped)
+        for y in range(self.param.h):
+            for x in range(self.param.w):
+                pt_be = np.array([[x], [y], [1]], dtype=np.float32)
+                pt_imp = np.dot(Hinv, pt_be)
+                pt_imp /= pt_imp[2]
+                self.unwarp_xmap[y,x], self.unwarp_ymap[y,x] =  pt_imp[:2]
+  
+    # Compute trasnform between distorted camera image and unwarped as map
+    def _compute_undist_unwarp_map(self, cam):
+        print('computing undist_unwarp maps')
+        self.undist_unwarp_xmap = np.zeros((self.param.h, self.param.w), np.float32)
+        self.undist_unwarp_ymap = np.zeros((self.param.h, self.param.w), np.float32)
+        Hinv = np.linalg.inv(self.H_unwarped)
+        for y in range(self.param.h):
+            for x in range(self.param.w):
+                    pt_be = np.array([[x, y, 1]], dtype=np.float32).T
+                    pt_imp = np.dot(cam.inv_undist_K, np.dot(Hinv, pt_be))
+                    pt_imp /= pt_imp[2]
+                    pt_img = cv2.projectPoints(pt_imp.T, np.zeros(3), np.zeros(3), cam.K, cam.D)[0]
+                    self.undist_unwarp_xmap[y,x], self.undist_unwarp_ymap[y,x] = pt_img.squeeze()
+        self.undist_unwarp_xmap_int, self.undist_unwarp_ymap_int = cv2.convertMaps(self.undist_unwarp_xmap, self.undist_unwarp_ymap, cv2.CV_16SC2)
+        
+    # Compute masks representing the bird eye area, for the camera and unwarped images
     def _compute_image_mask(self, cam):
         # project lfp contour to cam image
         cam_img_mask = cam.project(self.borders_isect_be_cam_lfp).squeeze()[np.newaxis].astype(np.int)
@@ -128,7 +183,8 @@ class BirdEye:
         unwarped_img_mask = self.lfp_to_unwarped(cam, self.borders_isect_be_cam_lfp)[np.newaxis].astype(np.int)
         # simplify polygon by removing uneeded vertices
         self.unwarped_img_mask = cv2.approxPolyDP(unwarped_img_mask, epsilon=1, closed=True).squeeze()[np.newaxis]
-
+        self.unwarped_img_mask2 = np.zeros((self.param.h, self.param.w), dtype=np.uint8)
+        cv2.fillPoly(self.unwarped_img_mask2, [self.unwarped_img_mask], color=255)
         
         
     # Conversions between lfp and unwarped     
@@ -137,13 +193,54 @@ class BirdEye:
         return cnt_uv
 
     def unwarped_to_fp(self, cam, cnt_uw):
-        self.cnt_fp = np.array([((self.param.h-p[1])*self.param.s+self.param.x0, (self.param.w/2-p[0])*self.s+self.param.y0, 0.) for p in cnt_uw.squeeze()])
+        self.cnt_fp = np.array([((self.param.h-p[1])*self.param.s+self.param.x0, (self.param.w/2-p[0])*self.param.s+self.param.y0, 0.) for p in cnt_uw.squeeze()])
         return self.cnt_fp
 
     # undistort, then unwarp image
-    def undist_unwarp_img(self, img, cam):
-        img_undist = cam.undistort_img(img)
-        return cv2.warpPerspective(img_undist, self.H_unwarped, (self.param.w, self.param.h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-
+    def undist_unwarp_img(self, img, cam, use_map=True):
+        if use_map:
+            img_unwarped = cv2.remap(img, self.undist_unwarp_xmap_int, self.undist_unwarp_ymap_int, cv2.INTER_LINEAR)
+        else:
+            img_undist = cam.undistort_img(img)
+            #img_unwarped = cv2.remap(img_undist, self.unwarp_xmap, self.unwarp_ymap, cv2.INTER_LINEAR) # optional
+            img_unwarped = cv2.warpPerspective(img_undist, self.H_unwarped, (self.param.w, self.param.h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        return img_unwarped
 
     
+
+
+class UnwarpedImage:
+
+    def draw_grid(self, img, be, cam):
+
+        colors = [(0,0,0), (0,0,255), (0,255,0), (255,0,0), (128, 128, 128)]
+        gridsize=0.025
+        for x in np.arange(be.param.x0, be.param.x0+be.param.dx, gridsize):
+            pts_lfp = np.array([[x, -be.param.dy, 0], [x, be.param.dy, 0]])
+            ps = [tuple(_p) for _p in be.lfp_to_unwarped(cam, pts_lfp).astype(int)]
+            cv2.line(img, ps[0], ps[1], colors[4], 1)
+        for y in np.arange(be.param.y0-be.param.dy/2, be.param.y0+be.param.dy/2, gridsize):
+            pts_lfp = np.array([[be.param.x0, y, 0], [be.param.x0+be.param.dx, y, 0]])
+            ps = [tuple(_p) for _p in be.lfp_to_unwarped(cam, pts_lfp).astype(int)]
+            cv2.line(img, ps[0], ps[1], colors[4], 1)
+
+        orig = [0.15, 0, 0]
+        pts_lfp = np.array([[0, 0, 0], [0.05, 0, 0], [0, 0.05, 0], [0, 0, 0.05]]) + orig
+        pts_img = be.lfp_to_unwarped(cam, pts_lfp)
+        ps = [tuple(_p) for _p in pts_img.astype(int)]
+        for i in range(1,4):
+            cv2.line(img, ps[0], ps[i], colors[i], 2)
+        f, h, c, w = cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1
+        cv2.putText(img, f'{pts_lfp[0,:2]}', ps[0], f, h, c, w)
+        cv2.putText(img, f'{pts_lfp[1,:2]}', ps[1], f, h, c, w)
+    
+
+    def draw_cam_va(self, img, be, cam):
+        #pts_lfp = be.borders_isect_be_cam_lfp
+        #ps = be.lfp_to_unwarped(cam, pts_lfp).astype(int)
+        #ps = ps.reshape((-1, 1, 2))
+        #print(ps, img.shape)
+        #cv2.polylines(img, ps, False, (0,0,255), 2)
+        #cv2.drawContours(img, ps, -1, (0,255,0), 3)
+
+        cv2.drawContours(img, be.unwarped_img_mask, -1, (0,255,255), 1)
