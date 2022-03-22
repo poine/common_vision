@@ -50,6 +50,7 @@ class JulieBirdEyeParam(BirdEyeParam):
 class BeParamTrilopi:
     #x0, y0, dx, dy = 0.11, 0., 0.25, 0.2 # bird eye area in local floor plane frame
     x0, y0, dx, dy = 0.10, 0., 0.15, 0.2 # bird eye area in local floor plane frame
+    max_dist = 0.3
     w = 640                     # bird eye image width (pixel coordinates)
     s = dy/w                    # scale
     h = int(dx/s)               # bird eye image height
@@ -78,7 +79,7 @@ class BirdEye:
         print(f'cache_filename {cache_filename}')
         if cache_filename is None or not os.path.exists(cache_filename) or force_recompute:
             try:
-                self._compute_cam_viewing_area(cam)
+                self._compute_cam_viewing_area(cam, max_dist=param.max_dist)
                 self._compute_H_lfp(cam)
                 self._compute_H_unwarped(cam)
                 self._compute_H_unwarped_map(cam)
@@ -112,7 +113,7 @@ class BirdEye:
             self.cam_img_mask = data['cam_img_mask']
         self._compute_image_mask(cam)
             
-    def _compute_cam_viewing_area(self, cam, max_dist=0.3):
+    def _compute_cam_viewing_area(self, cam, max_dist):
         # Compute the contour of the intersection between camera's frustum and floor plane (cliping to max_dist)
         cam_va_corners_img = np.array([[0., 0], [cam.w, 0], [cam.w, cam.h], [0, cam.h]])#, [0, 0]])
         cam_va_borders_img = _lines_of_corners(cam_va_corners_img, spacing=1)
@@ -121,15 +122,20 @@ class BirdEye:
         cam_va_borders_fp_cam = get_points_on_plane(cam_va_borders_imp, cam.fp_n, cam.fp_d)
         in_frustum_idx = np.logical_and(cam_va_borders_fp_cam[:,2]>0, cam_va_borders_fp_cam[:,2]<max_dist)
         cam_va_borders_fp_cam = cam_va_borders_fp_cam[in_frustum_idx,:]
-        self.cam_va_borders_fp_lfp = np.array([np.dot(cam.cam_to_world_T[:3], p.tolist()+[1]) for p in cam_va_borders_fp_cam]) 
-
+        self.cam_va_borders_fp_lfp = np.array([np.dot(cam.cam_to_world_T[:3], p.tolist()+[1]) for p in cam_va_borders_fp_cam])
+        print('computed cam viewing area on ground plane')
+        #print(f'{self.cam_va_borders_fp_lfp}\n {self.corners_lfp}')
+        
         # Compute intersection between camera viewing area and bird eye area
         poly_va_blf = shapely.geometry.Polygon(self.cam_va_borders_fp_lfp[:,:2])
         poly_be_blf = shapely.geometry.Polygon(self.corners_lfp[:,:2])
+        #print(f'{poly_va_blf} {poly_be_blf}')
         _tmp = poly_va_blf.intersection(poly_be_blf).exterior.coords.xy
         self.borders_isect_be_cam_lfp = np.zeros((len(_tmp[0]), 3))
         self.borders_isect_be_cam_lfp[:,:2] = np.array(_tmp).T
+        print('computed intersection of cam viewing area and bird eye area')
 
+        
     # Compute homography from undistorted image plane to local floor plane
     def _compute_H_lfp(self, cam):
         va_corners_img  = cam.project(self.borders_isect_be_cam_lfp)
@@ -197,13 +203,15 @@ class BirdEye:
         return self.cnt_fp
 
     # undistort, then unwarp image
-    def undist_unwarp_img(self, img, cam, use_map=True):
+    def undist_unwarp_img(self, img, cam, use_map=True, fill_bg=None):
         if use_map:
             img_unwarped = cv2.remap(img, self.undist_unwarp_xmap_int, self.undist_unwarp_ymap_int, cv2.INTER_LINEAR)
         else:
             img_undist = cam.undistort_img(img)
             #img_unwarped = cv2.remap(img_undist, self.unwarp_xmap, self.unwarp_ymap, cv2.INTER_LINEAR) # optional
             img_unwarped = cv2.warpPerspective(img_undist, self.H_unwarped, (self.param.w, self.param.h), borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        if fill_bg is not None:
+            img_unwarped[self.unwarped_img_mask2==0] = fill_bg
         return img_unwarped
 
     
@@ -211,10 +219,9 @@ class BirdEye:
 
 class UnwarpedImage:
 
-    def draw_grid(self, img, be, cam):
+    def draw_grid(self, img, be, cam, gridsize=0.025):
 
         colors = [(0,0,0), (0,0,255), (0,255,0), (255,0,0), (128, 128, 128)]
-        gridsize=0.025
         for x in np.arange(be.param.x0, be.param.x0+be.param.dx, gridsize):
             pts_lfp = np.array([[x, -be.param.dy, 0], [x, be.param.dy, 0]])
             ps = [tuple(_p) for _p in be.lfp_to_unwarped(cam, pts_lfp).astype(int)]
@@ -230,11 +237,18 @@ class UnwarpedImage:
         ps = [tuple(_p) for _p in pts_img.astype(int)]
         for i in range(1,4):
             cv2.line(img, ps[0], ps[i], colors[i], 2)
-        f, h, c, w = cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1
+        f, h, c, w = cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1
         cv2.putText(img, f'{pts_lfp[0,:2]}', ps[0], f, h, c, w)
         cv2.putText(img, f'{pts_lfp[1,:2]}', ps[1], f, h, c, w)
     
-
+    def draw_path(self, img, be, cam, points):
+        pts_world = np.array([[x, y, 0] for x, y in points])
+        pts_img = be.lfp_to_unwarped(cam, pts_world)
+        pts_img_int = [tuple(_p) for _p in pts_img.astype(int)]
+        color = (0, 255, 0)
+        for i in range(1,len(pts_img_int)):
+            cv2.line(img, pts_img_int[i-1], pts_img_int[i], color, 2)
+        
     def draw_cam_va(self, img, be, cam):
         #pts_lfp = be.borders_isect_be_cam_lfp
         #ps = be.lfp_to_unwarped(cam, pts_lfp).astype(int)
@@ -244,3 +258,5 @@ class UnwarpedImage:
         #cv2.drawContours(img, ps, -1, (0,255,0), 3)
 
         cv2.drawContours(img, be.unwarped_img_mask, -1, (0,255,255), 1)
+
+    

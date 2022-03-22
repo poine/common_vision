@@ -12,6 +12,10 @@ import pdb
 import logging
 LOG = logging.getLogger('common_vision.utils')
 
+chroma_blue, chroma_green = (187, 71, 0), (64, 177, 0)
+
+
+
 # Read an array of points - this is used for extrinsic calibration
 def read_point(yaml_data_path):
     with open(yaml_data_path, 'r') as stream:
@@ -93,7 +97,8 @@ def norm_angle(_a):
     return _a
 
 
-# fucked up python 2 vs 3
+# transitioning python 2 to 3
+# FIXME: looks like we have a version of that in rospy_utils...
 import numpy
 # epsilon for testing whether a number is close to zero
 _EPS = numpy.finfo(float).eps * 4.0

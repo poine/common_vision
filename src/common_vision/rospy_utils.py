@@ -131,7 +131,10 @@ class CameraListener:
 
     def started(self): return self.sub is not None
 
-
+#
+# A publisher that only publishes when someone is listening
+# It also handles fetching images from a camera topic when publishing
+#
 class DebugImgPublisher:
     def __init__(self, cam_name, topic_sink):
         self.image_pub = CompressedImgPublisher(cam=None, img_topic=topic_sink)
@@ -161,11 +164,28 @@ class DebugImgPublisher:
 
         if self.compressed_img is not None:
             self.img_bgr = cv2.imdecode(self.compressed_img, cv2.IMREAD_COLOR)
-            self._draw(self.img_bgr, model, user_data)
+            self._draw(self.img_bgr, model, user_data) # needs to be implemented by superclasses
             self.img_rgb = cv2.cvtColor(self.img_bgr, cv2.COLOR_BGR2RGB)
             #img_rgb = self.img[...,::-1] # rgb = bgr[...,::-1] OpenCV image to Matplotlib
             self.image_pub.publish2(self.img_rgb)
 
+
+#
+# A publisher that only publishes when someone is listening
+#
+class SavyPublisher(SimplePublisher):
+    def __init__(self, topic, msg_class, what, qs=1):
+        SimplePublisher.__init__(self, topic, msg_class, what, qs)
+
+    def publish1(self, model, args):
+        n_subscriber = self.get_num_connections()
+        if n_subscriber <= 0:
+            if self._is_connected(): self._disconnect()
+        else:
+            if not self._is_connected(): self._connect()
+            self._publish(model, args)
+
+        
 
 ### Transforms, stolen from pat3 to avoid dependency
 
@@ -290,7 +310,7 @@ class LaneModelSubscriber(SimpleSubscriber):
 #
 # Guidance Status
 #
-import two_d_guidance.msg # cleary not!!!!
+import two_d_guidance.msg # FIXME: cleary not!!!!
 class GuidanceStatusPublisher(SimplePublisher):
     def __init__(self, topic='guidance/status', what='N/A', timeout=0.1, user_callback=None):
         SimplePublisher.__init__(self, topic, two_d_guidance.msg.FLGuidanceStatus, what) # FIXME trr.msg.GuidanceStatus
