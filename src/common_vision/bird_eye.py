@@ -255,15 +255,20 @@ class UnwarpedImage:
          pts_trihedral = np.array([[0, 0, 0], [_len, 0, 0], [0, _len, 0], [0, 0, _len]])
          #print(f' pts_trihedral {pts_trihedral}')
          pts_world = np.array([cv_u.transform(T_trihedral_to_world, _p) for _p in pts_trihedral])
-         print(f' pts_world {pts_world}')
-         pts_img2 = cam.project(pts_world)
-         print(f' pts_img {pts_img2}')
-
-
+         pts_world[:,2]=0
+         #print(f' pts_world {pts_world}')
+         if 0:
+             pts_img = cam.project(pts_world)
+             #print(f' pts_img {pts_img }')
+             pts_img_undist = cam.undistort_points(pts_img.reshape(-1, 1, 2))
+             pts_img_imp = np.array([np.dot(cam.inv_undist_K, [u, v, 1]) for (u, v) in pts_img_undist.squeeze()])
+             pts_lfp = get_points_on_plane(pts_img_imp, cam.fp_n, cam.fp_d)
+             #print(f' pts_lfp {pts_lfp }')
+             #pts_img2 = be.lfp_to_unwarped(cam, pts_lfp)
          
-         pts_img = be.lfp_to_unwarped(cam, pts_world)
+         pts_img2 = be.lfp_to_unwarped(cam, pts_world)
          #print(f' pts_img {pts_img}')
-         pts_img_int = [tuple(_p) for _p in pts_img.astype(int)]
+         pts_img_int = [tuple(_p) for _p in pts_img2.astype(int)]
          #print(f' pts_img_int {pts_img_int}')
          colors = _k, _r, _g, _b = (0, 0, 0), (0,0,255), (0,255,0), (255,0,0)
          for i in range(1,4):

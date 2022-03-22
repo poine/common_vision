@@ -13,7 +13,7 @@ import logging
 LOG = logging.getLogger('common_vision.utils')
 
 chroma_blue, chroma_green = (187, 71, 0), (64, 177, 0)
-
+trihedral_colors = [(0,0,255), (0,255,0), (255,0,0)]
 
 
 # Read an array of points - this is used for extrinsic calibration
@@ -226,6 +226,15 @@ class Mask:
 
     
 
+class CamDrawer:
+    @staticmethod
+    def draw_trihedral(img, cam, T_trihedral_to_world, _len=0.1):
+        pts_trihedral = np.array([[0, 0, 0], [_len, 0, 0], [0, _len, 0], [0, 0, _len]])
+        pts_world = np.array([transform(T_trihedral_to_world, _p) for _p in pts_trihedral])
+        pts_img = cam.project(pts_world).squeeze()
+        pts_img_int = [tuple(_p) for _p in pts_img.astype(int)]
+        for i in range(1,4):
+            cv2.line(img, pts_img_int[0], pts_img_int[i], trihedral_colors[i-1], 2)
 
 
         
