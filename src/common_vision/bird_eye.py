@@ -6,6 +6,8 @@ import cv2, yaml
 import shapely, shapely.geometry
 import pdb
 
+import common_vision.utils as cv_u
+
 '''
  FIXME: tables seem to be missing, see BirdEyeTransformer in two_d_guidance/src/two_d_guidance/trr/vision/utils.py
 
@@ -248,7 +250,26 @@ class UnwarpedImage:
         color = (0, 255, 0)
         for i in range(1,len(pts_img_int)):
             cv2.line(img, pts_img_int[i-1], pts_img_int[i], color, 2)
-        
+
+    def draw_trihedral(self, img, be, cam, T_trihedral_to_world, _len=0.1):
+         pts_trihedral = np.array([[0, 0, 0], [_len, 0, 0], [0, _len, 0], [0, 0, _len]])
+         #print(f' pts_trihedral {pts_trihedral}')
+         pts_world = np.array([cv_u.transform(T_trihedral_to_world, _p) for _p in pts_trihedral])
+         print(f' pts_world {pts_world}')
+         pts_img2 = cam.project(pts_world)
+         print(f' pts_img {pts_img2}')
+
+
+         
+         pts_img = be.lfp_to_unwarped(cam, pts_world)
+         #print(f' pts_img {pts_img}')
+         pts_img_int = [tuple(_p) for _p in pts_img.astype(int)]
+         #print(f' pts_img_int {pts_img_int}')
+         colors = _k, _r, _g, _b = (0, 0, 0), (0,0,255), (0,255,0), (255,0,0)
+         for i in range(1,4):
+            cv2.line(img, pts_img_int[0], pts_img_int[i], colors[i], 2)
+            #cv2.circle(img, pts_img_int[i], 5, (0,255,0), -1)
+            
     def draw_cam_va(self, img, be, cam):
         #pts_lfp = be.borders_isect_be_cam_lfp
         #ps = be.lfp_to_unwarped(cam, pts_lfp).astype(int)
