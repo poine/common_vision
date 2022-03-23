@@ -13,7 +13,8 @@ import logging
 LOG = logging.getLogger('common_vision.utils')
 
 chroma_blue, chroma_green = (187, 71, 0), (64, 177, 0)
-trihedral_colors = [(0,0,255), (0,255,0), (255,0,0)]
+bgr_b, bgr_g, bgr_r = (255,0,0), (0,255,0), (0,0,255)
+trihedral_colors = [bgr_r, bgr_g, bgr_b]
 
 
 # Read an array of points - this is used for extrinsic calibration
